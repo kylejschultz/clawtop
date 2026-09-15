@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Read-only OpenClaw activity dashboard">
+  <title>Clawtop</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#detail">Skip to detail</a>
+  <header>
+    <div class="brand"><span class="prompt" aria-hidden="true">$</span> clawtop <span class="readonly">read only</span></div>
+    <div id="connection" class="connection" role="status" aria-live="polite">connecting</div>
+  </header>
+  <main>
+    <section class="rail" aria-labelledby="activity-title">
+      <div class="section-head">
+        <h1 id="activity-title">gateways / agents / sessions</h1>
+        <span id="counts">0 gateways · 0 agents · 0 sessions</span>
+      </div>
+      <div id="tree" class="tree" aria-live="polite"></div>
+    </section>
+    <section id="detail" class="detail" aria-labelledby="detail-title" tabindex="-1">
+      <div id="empty" class="empty">Select a session to inspect its safe live projection.</div>
+      <div id="detail-content" hidden>
+        <div class="detail-head">
+          <div><span id="detail-state" class="state"></span><h2 id="detail-title"></h2></div>
+          <span id="elapsed" class="clock"></span>
+        </div>
+        <dl id="facts"></dl>
+        <div id="progress" class="progress-card" hidden></div>
+        <h3>recent signals <span class="muted">newest first · ephemeral</span></h3>
+        <ol id="events" class="events"></ol>
+      </div>
+    </section>
+  </main>
+  <footer><span>Gateway credentials remain server-side.</span><span id="mode">mode: —</span></footer>
+</body>
+</html>

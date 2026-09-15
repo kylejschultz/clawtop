@@ -1,0 +1,14 @@
+[
+  {
+    "id": "scruffy",
+    "name": "Scruffy / Unraid",
+    "url": "wss://scruffy.example.ts.net",
+    "token": "replace-me"
+  },
+  {
+    "id": "morrow",
+    "name": "Morrow / Lantern",
+    "url": "wss://lantern.example.ts.net",
+    "token": "replace-me"
+  }
+]
