@@ -20,6 +20,21 @@ test("snapshots namespace colliding agent and session ids by Gateway", () => {
   assert.equal(Object.keys(state.agents).length, 2);
 });
 
+test("keeps per-agent sentinel sessions distinct", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [
+    root({ key: "global", agentId: "main", hasActiveRun: true }),
+    root({ key: "global", agentId: "research", hasActiveRun: true })
+  ], 10));
+  assert.ok(state.sessions["alpha::agent:main:global"]);
+  assert.ok(state.sessions["alpha::agent:research:global"]);
+  state = reduceDashboard(state, {
+    type: "progressCard", gateway: alpha, sourceKey: "global", sourceAgentId: "research", at: 20,
+    card: { sessionKey: "global", revision: 1, updatedAt: 20, markdown: "", steps: [{ step: "Research", status: "in_progress" }] }
+  });
+  assert.equal(state.sessions["alpha::agent:main:global"]?.progress, undefined);
+  assert.equal(state.sessions["alpha::agent:research:global"]?.progress?.step, "Research");
+});
+
 test("snapshot refresh preserves event details and other Gateways", () => {
   let state = createState("live", 100);
   state = reduceDashboard(state, snapshot(alpha, [root({ sessionId: "stable-alpha", hasActiveRun: true })], 200));
@@ -83,7 +98,7 @@ test("active run semantics distinguish idle, active, and unknown", () => {
   ], 10));
   assert.equal(state.sessions["alpha::active"]?.state, "active");
   assert.equal(state.sessions["alpha::idle"]?.state, "idle");
-  assert.equal(state.sessions["alpha::unknown"]?.state, "unknown");
+  assert.equal(state.sessions["alpha::agent:main:unknown"]?.state, "unknown");
 });
 
 test("events and connection failures remain isolated to their Gateway", () => {

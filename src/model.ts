@@ -75,7 +75,7 @@ export type DashboardState = {
 export type DashboardAction =
   | { type: "connection"; gateway: GatewayRef; state: ConnectionState; at: number; error?: string; serverVersion?: string }
   | { type: "snapshot"; gateway: GatewayRef; agents: AgentSummary[]; sessions: SessionWire[]; at: number; totalSessions?: number; activeSessions?: number; inactiveSessionsShown?: number; inactiveHistoryTruncated?: boolean; omittedInactiveSessions?: number }
-  | { type: "progressCard"; gateway: GatewayRef; sourceKey: string; card: ProgressCard | null; at: number }
+  | { type: "progressCard"; gateway: GatewayRef; sourceKey: string; sourceAgentId?: string; card: ProgressCard | null; at: number }
   | { type: "event"; gateway: GatewayRef; event: string; payload: unknown; at: number };
 
 export type SessionWire = SessionRow & {
@@ -125,7 +125,7 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
   }
   const sessions = withoutGateway(state.sessions, gatewayId);
   for (const row of action.sessions) {
-    const key = scoped(gatewayId, row.key);
+    const key = scopedSession(gatewayId, row.key, row.agentId);
     const agentId = scoped(gatewayId, row.agentId ?? "unknown");
     const old = state.sessions[key];
     const sessionId = sourceScope(gatewayId, row.sessionId);
@@ -141,8 +141,8 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
       title: row.label ?? row.displayName ?? row.autoLabel ?? shortKey(row.key),
       kind: row.kind,
       channel: row.channel,
-      parentSessionKey: sourceScope(gatewayId, row.parentSessionKey ?? row.spawnedBy),
-      childSessions: (row.childSessions ?? []).map((child) => scoped(gatewayId, child)),
+      parentSessionKey: sessionSourceScope(gatewayId, row.parentSessionKey ?? row.spawnedBy, row.agentId),
+      childSessions: (row.childSessions ?? []).map((child) => scopedSession(gatewayId, child, row.agentId)),
       state: nextState,
       activeSince: nextState === "active" ? prior?.activeSince ?? action.at : undefined,
       updatedAt: row.lastActivityAt ?? row.updatedAt ?? undefined,
@@ -174,7 +174,7 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
 }
 
 function applyProgressCard(state: DashboardState, action: Extract<DashboardAction, { type: "progressCard" }>): DashboardState {
-  const key = scoped(action.gateway.id, action.sourceKey);
+  const key = scopedSession(action.gateway.id, action.sourceKey, action.sourceAgentId);
   const current = state.sessions[key];
   if (!current) return { ...state, updatedAt: action.at };
   const session = compact({ ...current, progress: projectProgress(action.card) });
@@ -188,9 +188,13 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
   const nested = record(value.data);
   const sourceKey = string(value.sessionKey) ?? string(value.key) ?? string(nested?.sessionKey);
   if (!sourceKey) return { ...state, updatedAt: at };
-  const sessionKey = scoped(gateway.id, sourceKey);
-  const current = state.sessions[sessionKey];
+  const sourceAgentId = string(value.agentId) ?? string(nested?.agentId);
+  const candidates = Object.values(state.sessions).filter((session) => session.gatewayId === gateway.id && session.sourceKey === sourceKey);
+  const current = sourceAgentId
+    ? candidates.find((session) => session.agentId === scoped(gateway.id, sourceAgentId))
+    : candidates.length === 1 ? candidates[0] : undefined;
   if (!current) return { ...state, updatedAt: at };
+  const sessionKey = current.key;
 
   const activity = normalizeActivity(event, value, nested, sessionKey, at);
   let nextState = current.state;
@@ -282,6 +286,8 @@ function projectProgress(card: ProgressCard | null): DashboardProgress | undefin
 function withoutGateway<T extends { gatewayId: string }>(items: Record<string, T>, gatewayId: string): Record<string, T> { return Object.fromEntries(Object.entries(items).filter(([, item]) => item.gatewayId !== gatewayId)); }
 function scoped(gatewayId: string, id: string): string { return `${gatewayId}::${id}`; }
 function sourceScope(gatewayId: string, id: string | undefined): string | undefined { return id ? scoped(gatewayId, id) : undefined; }
+function scopedSession(gatewayId: string, key: string, agentId?: string): string { return scoped(gatewayId, (key === "global" || key === "unknown") && agentId ? `agent:${agentId}:${key}` : key); }
+function sessionSourceScope(gatewayId: string, key: string | undefined, agentId?: string): string | undefined { return key ? scopedSession(gatewayId, key, agentId) : undefined; }
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function string(value: unknown): string | undefined { return typeof value === "string" && value ? value : undefined; }
 function shortKey(key: string): string { const parts = key.split(":"); return parts.at(-1) || key; }

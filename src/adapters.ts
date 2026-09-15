@@ -160,9 +160,11 @@ class LiveAdapter implements ActivityAdapter {
       else this.scheduleRefresh();
     }
     if (frame.event === "progressCard.changed") {
-      const value = record(frame.payload)?.sessionKey;
+      const event = record(frame.payload);
+      const value = event?.sessionKey;
       const key = typeof value === "string" && value ? value : undefined;
-      const session = key ? findProgressSession(this.sessions, key) : undefined;
+      const agentId = typeof event?.agentId === "string" ? event.agentId : undefined;
+      const session = key ? findProgressSession(this.sessions, key, agentId) : undefined;
       if (session) void this.refreshProgress(session);
     }
     const payload = attachKnownSession(frame.payload, this.sessions);
@@ -206,7 +208,7 @@ class LiveAdapter implements ActivityAdapter {
     try {
       const params = compact({ sessionKey: session.key, agentId: this.progressAgentScope ? session.agentId : undefined });
       const result = await this.client.request<ProgressCardGetResult>("progressCard.get", params);
-      this.dispatch({ type: "progressCard", gateway: this.gateway, sourceKey: session.key, card: result.card, at: Date.now() });
+      this.dispatch({ type: "progressCard", gateway: this.gateway, sourceKey: session.key, sourceAgentId: session.agentId, card: result.card, at: Date.now() });
     } catch { /* optional read-only enrichment; retain the last safe projection */ }
   }
 }
@@ -326,14 +328,14 @@ function attachKnownSession(payload: unknown, sessions: SessionWire[]): unknown 
   const runId = typeof value.runId === "string" ? value.runId : undefined;
   if (!runId) return payload;
   const match = sessions.find((session) => session.activeRunIds?.includes(runId) || session.lastRunId === runId);
-  return match ? { ...value, data: { ...data, sessionKey: match.key } } : payload;
+  return match ? { ...value, agentId: match.agentId, data: { ...data, sessionKey: match.key } } : payload;
 }
 function wantsProgressCard(session: SessionWire): boolean {
   const active = session.hasActiveRun === true || session.hasActiveSubagentRun === true || (session.activeRunIds?.length ?? 0) > 0 || session.status === "running" || session.status === "queued";
   return active && !session.parentSessionKey && !session.spawnedBy;
 }
-function findProgressSession(sessions: SessionWire[], key: string): SessionWire | undefined {
-  return sessions.find((session) => session.key === key || (session.key === "global" && key === `agent:${session.agentId}:global`));
+function findProgressSession(sessions: SessionWire[], key: string, agentId?: string): SessionWire | undefined {
+  return sessions.find((session) => (!agentId || session.agentId === agentId) && (session.key === key || (session.key === "global" && key === `agent:${session.agentId}:global`)));
 }
 function subscriptionId(target: { key: string; agentId?: string }): string { return `${target.agentId ?? ""}\u0000${target.key}`; }
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
