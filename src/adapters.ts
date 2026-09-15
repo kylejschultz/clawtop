@@ -66,6 +66,7 @@ class LiveAdapter implements ActivityAdapter {
   private readonly gateway: GatewayRef;
   private readonly secrets: string[];
   private readonly subscriptions: ExactSessionSubscriptions;
+  private readonly readActiveSessions: () => Promise<SessionsResult | undefined>;
   private stopped = false;
   private refreshTimer?: NodeJS.Timeout;
   private bootstrapInFlight = false;
@@ -110,7 +111,9 @@ class LiveAdapter implements ActivityAdapter {
       },
       onGap: () => this.scheduleRefresh()
     });
-    this.subscriptions = new ExactSessionSubscriptions((method, params) => this.client.request(method, params));
+    const request = (method: string, params: Record<string, unknown>) => this.client.request(method, params);
+    this.subscriptions = new ExactSessionSubscriptions(request);
+    this.readActiveSessions = createActiveSessionFetcher(request);
   }
 
   start(): void {
@@ -136,10 +139,11 @@ class LiveAdapter implements ActivityAdapter {
       const [agents, subscription, active] = await Promise.all([
         this.client.request<AgentsResult>("agents.list", {}),
         this.client.request<SessionsSubscribeResult>("sessions.subscribe", { limit: SESSION_PAGE_SIZE }),
-        fetchActiveSessions((method, params) => this.client.request(method, params))
+        this.readActiveSessions()
       ]);
       const nextAgents = validAgents(agents);
-      const view = mergeSessionViews(validSessions(subscription.list), active);
+      const recent = validSessions(subscription.list);
+      const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent));
       if (revision !== this.snapshotRevision) return;
       this.agents = nextAgents;
       const needsTrailingRefresh = this.bootstrapDirty;
@@ -180,10 +184,10 @@ class LiveAdapter implements ActivityAdapter {
     try {
       const [recent, active] = await Promise.all([
         this.client.request<SessionsResult>("sessions.list", { limit: SESSION_PAGE_SIZE }).then(validSessions),
-        fetchActiveSessions((method, params) => this.client.request(method, params))
+        this.readActiveSessions()
       ]);
       if (revision !== this.snapshotRevision) return;
-      const view = mergeSessionViews(recent, active);
+      const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent));
       this.sessions = view.sessions;
       await this.publishSnapshot(view);
     } catch (error) {
@@ -266,6 +270,19 @@ class DemoAdapter implements ActivityAdapter {
   }
 }
 
+export function createActiveSessionFetcher(request: Request): () => Promise<SessionsResult | undefined> {
+  let supported = true;
+  return async () => {
+    if (!supported) return undefined;
+    try { return await fetchActiveSessions(request); }
+    catch (error) {
+      if (!rejectsActiveOnly(error)) throw error;
+      supported = false;
+      return undefined;
+    }
+  };
+}
+
 export async function fetchActiveSessions(request: Request): Promise<SessionsResult> {
   const sessions = new Map<string, SessionWire>();
   let offset = 0;
@@ -282,6 +299,10 @@ export async function fetchActiveSessions(request: Request): Promise<SessionsRes
     offset = nextOffset;
   }
   return { sessions: [...sessions.values()], hasMore: false, totalCount };
+}
+
+function activeSessionsFromRecent(recent: SessionsResult): SessionsResult {
+  return { sessions: recent.sessions.filter(isActiveSession), hasMore: false };
 }
 
 export function mergeSessionViews(recent: SessionsResult, active: SessionsResult): SessionViewResult {
@@ -332,8 +353,14 @@ function attachKnownSession(payload: unknown, sessions: SessionWire[]): unknown 
   return match ? { ...value, agentId: match.agentId, data: { ...data, sessionKey: match.key } } : payload;
 }
 function wantsProgressCard(session: SessionWire): boolean {
-  const active = session.hasActiveRun === true || session.hasActiveSubagentRun === true || (session.activeRunIds?.length ?? 0) > 0 || session.status === "running" || session.status === "queued";
-  return active && !session.parentSessionKey && !session.spawnedBy;
+  return isActiveSession(session) && !session.parentSessionKey && !session.spawnedBy;
+}
+function isActiveSession(session: SessionWire): boolean {
+  return session.hasActiveRun === true || session.hasActiveSubagentRun === true || (session.activeRunIds?.length ?? 0) > 0 || session.status === "running" || session.status === "queued";
+}
+function rejectsActiveOnly(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /invalid sessions\.list params:.*unexpected property ['"]?activeOnly['"]?/iu.test(message);
 }
 function findProgressSession(sessions: SessionWire[], key: string, agentId?: string): SessionWire | undefined {
   return sessions.find((session) => (!agentId || session.agentId === agentId) && (session.key === key || (session.key === "global" && key === `agent:${session.agentId}:global`)));

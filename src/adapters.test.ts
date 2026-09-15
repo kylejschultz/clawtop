@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews } from "./adapters.js";
+import { createActiveSessionFetcher, ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews } from "./adapters.js";
 import type { SessionWire } from "./model.js";
 
 const row = (key: string, agentId = "main"): SessionWire => ({ key, kind: "direct", agentId });
@@ -72,6 +72,25 @@ test("paginates activeOnly reads until every active session is present", async (
     { activeOnly: true, limit: 200, offset: 0 },
     { activeOnly: true, limit: 200, offset: 200 }
   ]);
+});
+
+test("caches the legacy sessions.list fallback when activeOnly is unsupported", async () => {
+  let calls = 0;
+  const read = createActiveSessionFetcher(async () => {
+    calls += 1;
+    throw new Error("invalid sessions.list params: at root: unexpected property 'activeOnly'");
+  });
+
+  assert.equal(await read(), undefined);
+  assert.equal(await read(), undefined);
+  assert.equal(calls, 1);
+});
+
+test("does not mask unrelated sessions.list errors", async () => {
+  const read = createActiveSessionFetcher(async () => {
+    throw new Error("invalid sessions.list params: limit is too large");
+  });
+  await assert.rejects(read(), /limit is too large/);
 });
 
 test("rejects ambiguous or non-advancing active pagination instead of publishing an incomplete set", async () => {
