@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createActiveSessionFetcher, ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews } from "./adapters.js";
+import { createActiveSessionFetcher, ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews, subscribeSessions } from "./adapters.js";
 import type { SessionWire } from "./model.js";
 
 const row = (key: string, agentId = "main"): SessionWire => ({ key, kind: "direct", agentId });
@@ -72,6 +72,30 @@ test("paginates activeOnly reads until every active session is present", async (
     { activeOnly: true, limit: 200, offset: 0 },
     { activeOnly: true, limit: 200, offset: 200 }
   ]);
+});
+
+test("fetches a recent page when legacy sessions.subscribe omits its list", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const result = await subscribeSessions(async (method, params) => {
+    calls.push({ method, params });
+    return method === "sessions.subscribe" ? { subscribed: true } : { sessions: [row("legacy")] };
+  });
+
+  assert.deepEqual(result.sessions, [row("legacy")]);
+  assert.deepEqual(calls, [
+    { method: "sessions.subscribe", params: { limit: 200 } },
+    { method: "sessions.list", params: { limit: 200 } }
+  ]);
+});
+
+test("keeps the modern sessions.subscribe list without an extra read", async () => {
+  let calls = 0;
+  const result = await subscribeSessions(async () => {
+    calls += 1;
+    return { subscribed: true, list: { sessions: [row("modern")] } };
+  });
+  assert.deepEqual(result.sessions, [row("modern")]);
+  assert.equal(calls, 1);
 });
 
 test("caches the legacy sessions.list fallback when activeOnly is unsupported", async () => {

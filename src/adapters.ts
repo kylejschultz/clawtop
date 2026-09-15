@@ -18,7 +18,6 @@ export type SessionViewResult = SessionsResult & {
   inactiveHistoryTruncated?: boolean;
   omittedInactiveSessions?: number;
 };
-type SessionsSubscribeResult = { subscribed: true; list?: SessionsResult };
 type ProgressCardGetResult = { card: ProgressCard | null };
 type Request = (method: string, params: Record<string, unknown>) => Promise<unknown>;
 const SESSION_PAGE_SIZE = 200;
@@ -136,13 +135,12 @@ class LiveAdapter implements ActivityAdapter {
     this.bootstrapInFlight = true;
     this.bootstrapDirty = false;
     try {
-      const [agents, subscription, active] = await Promise.all([
+      const [agents, recent, active] = await Promise.all([
         this.client.request<AgentsResult>("agents.list", {}),
-        this.client.request<SessionsSubscribeResult>("sessions.subscribe", { limit: SESSION_PAGE_SIZE }),
+        subscribeSessions((method, params) => this.client.request(method, params)),
         this.readActiveSessions()
       ]);
       const nextAgents = validAgents(agents);
-      const recent = validSessions(subscription.list);
       const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent));
       if (revision !== this.snapshotRevision) return;
       this.agents = nextAgents;
@@ -268,6 +266,13 @@ class DemoAdapter implements ActivityAdapter {
     this.step += 1;
     if (item) this.dispatch({ type: "event", gateway: this.morrow, event: item.event, payload: item.payload, at: Date.now() });
   }
+}
+
+export async function subscribeSessions(request: Request): Promise<SessionsResult> {
+  const value = record(await request("sessions.subscribe", { limit: SESSION_PAGE_SIZE }));
+  if (value?.subscribed !== true) throw new Error("sessions.subscribe returned an invalid payload");
+  if (value.list !== undefined) return validSessions(value.list);
+  return validSessions(await request("sessions.list", { limit: SESSION_PAGE_SIZE }));
 }
 
 export function createActiveSessionFetcher(request: Request): () => Promise<SessionsResult | undefined> {
