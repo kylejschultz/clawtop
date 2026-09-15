@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 gateways.json
+data/
 .data/
+docker-compose.override.yml
 *.log
 .DS_Store

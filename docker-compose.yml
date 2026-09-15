@@ -1,0 +1,19 @@
+services:
+  clawtop:
+    image: ghcr.io/kylejschultz/clawtop:latest
+    container_name: clawtop
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${CLAWTOP_BIND_ADDRESS:-127.0.0.1}:${CLAWTOP_HOST_PORT:-3333}:3333"
+    volumes:
+      - "${CLAWTOP_DATA_PATH:-./data}:/data"
+      - "${CLAWTOP_GATEWAYS_PATH:-./gateways.json}:/run/secrets/clawtop-gateways.json:ro"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

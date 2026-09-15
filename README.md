@@ -58,7 +58,7 @@ For Compose, copy `gateways.example.json` to an ignored private file:
 ]
 ```
 
-Set `CLAWTOP_MODE=live`, `CLAWTOP_HTTP_PASSWORD` to a long random password, and `CLAWTOP_GATEWAYS_FILE=/run/secrets/clawtop-gateways.json`, then mount that file read-only as shown in `compose.example.yml`. The HTTP Basic username defaults to `clawtop` and can be changed with `CLAWTOP_HTTP_USERNAME`. `CLAWTOP_GATEWAYS` accepts the same array inline when an environment value is more convenient. Each entry supports:
+Set `CLAWTOP_MODE=live`, `CLAWTOP_HTTP_PASSWORD` to a long random password, and `CLAWTOP_GATEWAYS_FILE=/run/secrets/clawtop-gateways.json`. The committed `docker-compose.yml` bind-mounts the private file from `CLAWTOP_GATEWAYS_PATH`. The HTTP Basic username defaults to `clawtop` and can be changed with `CLAWTOP_HTTP_USERNAME`. `CLAWTOP_GATEWAYS` accepts the same array inline when an environment value is more convenient. Each entry supports:
 
 - `id`, `name`, and `url` (required); keep `id` stable even if the display name or route changes
 - either `token` or `password` for initial authentication (never both)
@@ -105,24 +105,25 @@ Prefer `wss://` for Gateway connections. The official client accepts plaintext o
 ```bash
 cp .env.example .env
 cp gateways.example.json gateways.json
-# edit both private files and uncomment the gateways.json mount
+# edit both private files
 
-docker compose -f compose.example.yml pull
-docker compose -f compose.example.yml up -d
+docker compose pull
+docker compose up -d
 ```
 
-Pushes to `main` publish `ghcr.io/kylejschultz/clawtop:latest`; version tags also publish their semantic version, and every build receives an immutable `sha-<commit>` tag. The example publishes `127.0.0.1:3333:3333`; put TLS/Tailnet/reverse-proxy access in front of that loopback listener rather than widening it casually. The container runs unprivileged, drops capabilities, uses a read-only root filesystem, and writes only to `/data`. Authenticated `/api/health` returns `200` only when every configured Gateway is connected; its body reports each Gateway's state plus aggregate Gateway/agent/session counts without URLs or credentials.
+Pushes to `main` publish `ghcr.io/kylejschultz/clawtop:latest`; version tags also publish their semantic version, and every build receives an immutable `sha-<commit>` tag. The Compose file uses host bind mounts—not an anonymous or named Docker volume—so identities and paired tokens remain in `CLAWTOP_DATA_PATH`, while the private Gateway list comes from `CLAWTOP_GATEWAYS_PATH`. It publishes `127.0.0.1:3333:3333` by default; put TLS/Tailnet/reverse-proxy access in front of that loopback listener rather than widening it casually. The container runs unprivileged, drops capabilities, uses a read-only root filesystem, and writes only to `/data`. Authenticated `/api/health` returns `200` only when every configured Gateway is connected; its body reports each Gateway's state plus aggregate Gateway/agent/session counts without URLs or credentials.
 
 ## Unraid: Scruffy plus remote Morrow
 
-Add Clawtop beside Scruffy in the existing authoritative Scruffy Compose Manager project; preserve that project's current name, services, networks, mounts, labels, and healthchecks. Do not recreate or rename the Scruffy stack merely to add Clawtop.
+Create an authoritative `clawtop` Compose Manager project from the committed `docker-compose.yml`; keep Unraid-only WebUI/icon labels in its local `docker-compose.override.yml`. Use `ghcr.io/kylejschultz/clawtop:latest` and advance it only with an explicit pull and recreate.
 
-1. Add the Clawtop service to the Scruffy project using `ghcr.io/kylejschultz/clawtop@sha256:<published-digest>` and durable storage such as `/mnt/user/appdata/clawtop:/data`. Resolve and pin the digest produced by the successful `main` publication rather than deploying the mutable `latest` tag.
-2. Configure Scruffy as one Gateway entry using its existing private local route.
-3. Expose Lantern/Morrow to Unraid through a secure `wss://` tailnet route (recommended), then add it as the second entry. Do not expose Lantern's Gateway broadly or send credentials over plaintext between hosts.
-4. Mount `gateways.json` read-only, start Clawtop, and approve Clawtop separately on Scruffy and Morrow.
-5. Remove shared bootstrap credentials after paired device tokens are saved, then verify both Gateway roots show connected.
-6. Keep port `3333` bound to loopback and expose it only through TLS on a trusted tailnet or authenticated reverse proxy.
+1. Copy `.env.example` to the project's private `.env`. Set `CLAWTOP_DATA_PATH=/mnt/user/appdata/clawtop`, `CLAWTOP_GATEWAYS_PATH=/mnt/user/appdata/clawtop/gateways.json`, `CLAWTOP_MODE=live`, and a long `CLAWTOP_HTTP_PASSWORD`. Set the bind address to the exact trusted interface used for access.
+2. Copy `gateways.example.json` to `/mnt/user/appdata/clawtop/gateways.json` and fill it privately. Make the data directory writable by container UID 1000 and the Gateway file readable by that UID; the JSON is mounted read-only.
+3. Configure Scruffy as one Gateway entry using its private host route.
+4. Expose Lantern/Morrow to Unraid through a secure `wss://` tailnet route (recommended), then add it as the second entry. Do not expose Lantern's Gateway broadly or send credentials over plaintext between hosts.
+5. Start Clawtop and approve its device separately on Scruffy and Morrow.
+6. Remove shared bootstrap credentials after paired device tokens are saved, then verify both Gateway roots show connected.
+7. Expose port `3333` only on a trusted interface or through TLS on a trusted tailnet/authenticated reverse proxy.
 
 No dynamic configuration UI is included; Gateway membership is intentionally deployment configuration.
 
