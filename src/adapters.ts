@@ -272,7 +272,8 @@ export async function fetchActiveSessions(request: Request): Promise<SessionsRes
     totalCount = page.totalCount ?? totalCount;
     const before = sessions.size;
     for (const session of page.sessions) sessions.set(subscriptionId(session), session);
-    if (page.hasMore === false || (page.hasMore === undefined && page.sessions.length < SESSION_PAGE_SIZE)) break;
+    if (page.hasMore === false || (page.hasMore === undefined && totalCount !== undefined && sessions.size >= totalCount)) break;
+    if (page.hasMore === undefined && totalCount === undefined) throw new Error("active session list omitted pagination metadata");
     const nextOffset = page.nextOffset ?? offset + page.sessions.length;
     if (nextOffset <= offset || sessions.size === before) throw new Error("active session pagination did not advance");
     offset = nextOffset;

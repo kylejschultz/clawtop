@@ -74,7 +74,8 @@ test("paginates activeOnly reads until every active session is present", async (
   ]);
 });
 
-test("rejects non-advancing active pagination instead of publishing an incomplete set", async () => {
+test("rejects ambiguous or non-advancing active pagination instead of publishing an incomplete set", async () => {
+  await assert.rejects(fetchActiveSessions(async () => ({ sessions: [] })), /omitted pagination metadata/);
   await assert.rejects(
     fetchActiveSessions(async () => ({ sessions: [row("same")], hasMore: true, nextOffset: 0 })),
     /did not advance/
