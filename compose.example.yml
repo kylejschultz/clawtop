@@ -1,6 +1,6 @@
 services:
   clawtop:
-    build: .
+    image: ghcr.io/kylejschultz/clawtop:latest
     container_name: clawtop
     restart: unless-stopped
     env_file: .env

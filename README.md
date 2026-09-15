@@ -107,16 +107,17 @@ cp .env.example .env
 cp gateways.example.json gateways.json
 # edit both private files and uncomment the gateways.json mount
 
-docker compose -f compose.example.yml up -d --build
+docker compose -f compose.example.yml pull
+docker compose -f compose.example.yml up -d
 ```
 
-The example publishes `127.0.0.1:3333:3333`; put TLS/Tailnet/reverse-proxy access in front of that loopback listener rather than widening it casually. The container runs unprivileged, drops capabilities, uses a read-only root filesystem, and writes only to `/data`. Authenticated `/api/health` returns `200` only when every configured Gateway is connected; its body reports each Gateway's state plus aggregate Gateway/agent/session counts without URLs or credentials.
+Pushes to `main` publish `ghcr.io/kylejschultz/clawtop:latest`; version tags also publish their semantic version, and every build receives an immutable `sha-<commit>` tag. The example publishes `127.0.0.1:3333:3333`; put TLS/Tailnet/reverse-proxy access in front of that loopback listener rather than widening it casually. The container runs unprivileged, drops capabilities, uses a read-only root filesystem, and writes only to `/data`. Authenticated `/api/health` returns `200` only when every configured Gateway is connected; its body reports each Gateway's state plus aggregate Gateway/agent/session counts without URLs or credentials.
 
 ## Unraid: Scruffy plus remote Morrow
 
 Add Clawtop beside Scruffy in the existing authoritative Scruffy Compose Manager project; preserve that project's current name, services, networks, mounts, labels, and healthchecks. Do not recreate or rename the Scruffy stack merely to add Clawtop.
 
-1. Add the Clawtop service/build files to the Scruffy project and use durable storage such as `/mnt/user/appdata/clawtop:/data`.
+1. Add the Clawtop service to the Scruffy project using `ghcr.io/kylejschultz/clawtop@sha256:<published-digest>` and durable storage such as `/mnt/user/appdata/clawtop:/data`. Resolve and pin the digest produced by the successful `main` publication rather than deploying the mutable `latest` tag.
 2. Configure Scruffy as one Gateway entry using its existing private local route.
 3. Expose Lantern/Morrow to Unraid through a secure `wss://` tailnet route (recommended), then add it as the second entry. Do not expose Lantern's Gateway broadly or send credentials over plaintext between hosts.
 4. Mount `gateways.json` read-only, start Clawtop, and approve Clawtop separately on Scruffy and Morrow.
