@@ -61,7 +61,7 @@ For Compose, copy `gateways.example.json` to an ignored private file:
 Set `CLAWTOP_MODE=live`, `CLAWTOP_HTTP_PASSWORD` to a long random password, and `CLAWTOP_GATEWAYS_FILE=/run/secrets/clawtop-gateways.json`. The committed `docker-compose.yml` bind-mounts the private file from `CLAWTOP_GATEWAYS_PATH`. The HTTP Basic username defaults to `clawtop` and can be changed with `CLAWTOP_HTTP_USERNAME`. `CLAWTOP_GATEWAYS` accepts the same array inline when an environment value is more convenient. Each entry supports:
 
 - `id`, `name`, and `url` (required); keep `id` stable even if the display name or route changes
-- either `token` or `password` for initial authentication (never both)
+- at most one of `token`, `password`, or a short-lived `bootstrapToken` for initial authentication
 - `fingerprint` when certificate pinning is needed (`tlsFingerprint` remains accepted as a compatibility alias)
 
 Gateway IDs must be unique. They namespace otherwise-colliding agent/session IDs and select the persistent identity directory, so keep them stable.
@@ -92,7 +92,7 @@ openclaw devices list
 openclaw devices approve <requestId>
 ```
 
-After a Gateway has connected and saved its narrower paired device token, its shared token/password may be removed from the list. Keep the data volume across upgrades; losing one Gateway directory requires re-pairing only that Gateway.
+After a Gateway has connected and saved its narrower paired device token, remove its shared token, password, or expired bootstrap token from the list. Keep the data volume across upgrades; losing one Gateway directory requires re-pairing only that Gateway.
 
 ### Transport and dashboard safety
 

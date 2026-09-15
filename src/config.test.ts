@@ -74,11 +74,24 @@ test("requires an explicit stable id for list and shorthand configuration", () =
   }), /name is required/);
 });
 
+test("accepts short-lived bootstrap authentication", () => {
+  const config = loadConfig({
+    CLAWTOP_MODE: "live",
+    CLAWTOP_HTTP_PASSWORD: "dashboard-secret",
+    CLAWTOP_GATEWAYS: JSON.stringify([{ id: "one", name: "One", url: "ws://10.10.10.11:18789", bootstrapToken: "short-lived" }])
+  });
+  assert.equal(config.gateways[0]?.bootstrapToken, "short-lived");
+});
+
 test("rejects conflicting authentication and fingerprint settings", () => {
   assert.throws(() => loadConfig({
     CLAWTOP_MODE: "live",
     CLAWTOP_GATEWAYS: JSON.stringify([{ id: "one", name: "One", url: "wss://one.example", token: "a", password: "b" }])
-  }), /both token and password/);
+  }), /at most one/);
+  assert.throws(() => loadConfig({
+    CLAWTOP_MODE: "live",
+    CLAWTOP_GATEWAYS: JSON.stringify([{ id: "one", name: "One", url: "wss://one.example", token: "a", bootstrapToken: "b" }])
+  }), /at most one/);
   assert.throws(() => loadConfig({
     CLAWTOP_MODE: "live",
     CLAWTOP_GATEWAYS: JSON.stringify([{ id: "one", name: "One", url: "wss://one.example", fingerprint: "a", tlsFingerprint: "b" }])

@@ -79,11 +79,12 @@ class LiveAdapter implements ActivityAdapter {
     const { identity, hostDeps } = createIdentityHost(join(dataDir, "gateways", config.id));
     this.gateway = { id: config.id, name: config.name };
     this.dispatch = dispatch;
-    this.secrets = [config.token, config.password].filter((value): value is string => Boolean(value));
+    this.secrets = [config.token, config.password, config.bootstrapToken].filter((value): value is string => Boolean(value));
     this.client = new GatewayClient({
       url: config.url,
       token: config.token,
       password: config.password,
+      bootstrapToken: config.bootstrapToken,
       tlsFingerprint: config.tlsFingerprint,
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
       clientDisplayName: `Clawtop (${config.name})`,

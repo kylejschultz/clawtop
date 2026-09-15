@@ -7,6 +7,7 @@ export type GatewayConfig = {
   url: string;
   token?: string;
   password?: string;
+  bootstrapToken?: string;
   tlsFingerprint?: string;
 };
 
@@ -98,14 +99,16 @@ function parseGateway(value: unknown, index: number): GatewayConfig {
   const tlsFingerprint = optionalString(item.tlsFingerprint);
   const token = optionalString(item.token);
   const password = optionalString(item.password);
+  const bootstrapToken = optionalString(item.bootstrapToken);
   if (fingerprint && tlsFingerprint && fingerprint !== tlsFingerprint) fail(`Gateway ${name} must not set conflicting fingerprint and tlsFingerprint values`);
-  if (token && password) fail(`Gateway ${name} must not set both token and password`);
+  if ([token, password, bootstrapToken].filter(Boolean).length > 1) fail(`Gateway ${name} must set at most one of token, password, or bootstrapToken`);
   return compact({
     id,
     name,
     url,
     token,
     password,
+    bootstrapToken,
     tlsFingerprint: fingerprint ?? tlsFingerprint
   });
 }
