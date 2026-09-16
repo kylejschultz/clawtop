@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createState, reduceDashboard, type GatewayRef, type SessionWire } from "./model.js";
+import { createState, reduceDashboard, safeCommand, type GatewayRef, type SessionWire } from "./model.js";
 
 const alpha: GatewayRef = { id: "alpha", name: "Alpha" };
 const beta: GatewayRef = { id: "beta", name: "Beta" };
@@ -33,6 +33,22 @@ test("keeps per-agent sentinel sessions distinct", () => {
   });
   assert.equal(state.sessions["alpha::agent:main:global"]?.progress, undefined);
   assert.equal(state.sessions["alpha::agent:research:global"]?.progress?.step, "Research");
+});
+
+test("projects useful tool commands while redacting credential-shaped values", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [root({ sessionId: "stable", hasActiveRun: true })], 10));
+  state = reduceDashboard(state, {
+    type: "event", gateway: alpha, at: 20, event: "agent",
+    payload: {
+      sessionKey: root().key, runId: "run", stream: "tool",
+      data: { phase: "start", name: "exec", toolCallId: "call", args: { title: "Run checks", command: "npm test --token supersecret" } }
+    }
+  });
+  const item = state.sessions["alpha::agent:main:root"]?.activity[0];
+  assert.equal(item?.label, "exec");
+  assert.equal(item?.detail, "Run checks · npm test --token ***");
+  assert.equal(JSON.stringify(state).includes("supersecret"), false);
+  assert.equal(safeCommand("git status --short"), "git status --short");
 });
 
 test("snapshot refresh preserves event details and other Gateways", () => {

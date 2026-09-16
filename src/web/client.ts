@@ -1,5 +1,5 @@
 type ActivityState = "active" | "idle" | "unknown";
-type Activity = { id: string; at: number; kind: string; label: string; status?: string; runId?: string };
+type Activity = { id: string; at: number; kind: string; label: string; detail?: string; status?: string; runId?: string };
 type Gateway = { id: string; name: string; totalSessions?: number; activeSessions?: number; inactiveSessionsShown?: number; inactiveHistoryTruncated?: boolean; omittedInactiveSessions?: number; connection: { state: string; since: number; error?: string; serverVersion?: string } };
 type Runtime = { id: string; source: string; fallback?: string; cloudPlacementSupported?: boolean; cloudPlacementExecutionMode?: string; devicePlacementSupported?: boolean; devicePlacement?: { consumesWorkerSlot: boolean } };
 type Placement = { state: string; providerId?: string; profileId?: string; machine?: { class?: string; os?: string; osLabel?: string }; runner?: { kind: "device"; status: "available" | "offline"; deviceId?: string } };
@@ -11,6 +11,7 @@ type State = { mode: "demo" | "live"; gateways: Record<string, Gateway>; agents:
 let state: State | undefined;
 let selected = "";
 let browserConnected = false;
+const expandedGateways = new Set<string>();
 const tree = get("tree");
 const detailContent = get("detail-content") as HTMLElement;
 const empty = get("empty") as HTMLElement;
@@ -32,9 +33,15 @@ function render(): void {
   const gateways = Object.values(state.gateways);
   const agents = Object.values(state.agents);
   const sessions = Object.values(state.sessions);
-  const truncated = gateways.filter((gateway) => gateway.inactiveHistoryTruncated);
   const active = sessions.filter((session) => session.state === "active").length;
-  get("counts").textContent = `${gateways.length} gateways · ${agents.length} agents · ${sessions.length} sessions shown · all ${active} active included + one 200-row recent page/Gateway${truncated.length ? ` · inactive history truncated: ${truncated.map((gateway) => `${gateway.name}${gateway.omittedInactiveSessions ? ` (${gateway.omittedInactiveSessions} hidden)` : ""}`).join(", ")}` : ""}`;
+  const connected = gateways.filter((gateway) => gateway.connection.state === "connected").length;
+  const hidden = gateways.reduce((sum, gateway) => sum + (gateway.omittedInactiveSessions ?? 0), 0);
+  get("metric-gateways").textContent = `${connected}/${gateways.length}`;
+  get("metric-agents").textContent = String(agents.length);
+  get("metric-sessions").textContent = String(sessions.length);
+  get("metric-active").textContent = String(active);
+  get("metric-updated").textContent = relative(state.updatedAt);
+  get("counts").textContent = `${sessions.length} shown${hidden ? ` · ${hidden} older inactive hidden` : ""}`;
   renderConnection();
   tree.replaceChildren(...gateways.sort((a, b) => a.name.localeCompare(b.name)).map((gateway) => renderGateway(
     gateway,
@@ -45,16 +52,56 @@ function render(): void {
 }
 
 function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): HTMLElement {
-  const section = element("section", "gateway");
-  const title = element("div", `gateway-title ${gateway.connection.state}`);
-  const total = gateway.totalSessions !== undefined ? ` of ${gateway.totalSessions}` : "";
+  const expanded = expandedGateways.has(gateway.id);
+  const section = element("section", `gateway${expanded ? " expanded" : " collapsed"}`);
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = `gateway-toggle ${gateway.connection.state}`;
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", `gateway-${gateway.id}`);
+  toggle.addEventListener("click", () => {
+    if (expandedGateways.has(gateway.id)) expandedGateways.delete(gateway.id);
+    else expandedGateways.add(gateway.id);
+    render();
+  });
+
   const active = gateway.activeSessions ?? sessions.filter((session) => session.state === "active").length;
   const inactive = gateway.inactiveSessionsShown ?? Math.max(0, sessions.length - active);
-  const hidden = gateway.omittedInactiveSessions ? ` · ${gateway.omittedInactiveSessions} inactive hidden` : gateway.inactiveHistoryTruncated ? " · inactive history truncated" : "";
-  title.append(text(gateway.name), text(`${gateway.connection.state} · ${sessions.length}${total} shown · ${active} active + ${inactive} recent inactive${hidden}`, "gateway-meta"));
-  section.append(title);
-  for (const agent of agents.sort((a, b) => a.name.localeCompare(b.name))) section.append(renderAgent(agent, sessions.filter((session) => session.agentId === agent.id)));
+  const total = gateway.totalSessions ?? sessions.length;
+  const focus = sortSessions(sessions.filter((session) => session.state === "active"))[0];
+  const focusText = focus?.progress?.step ?? focus?.title ?? "No active sessions";
+  const heading = element("span", "gateway-heading");
+  heading.append(text("", `gateway-caret${expanded ? " open" : ""}`), text(gateway.name, "gateway-name"), text(gateway.connection.state, "gateway-state"));
+  const version = gateway.connection.serverVersion ? `v${gateway.connection.serverVersion}` : "version unknown";
+  heading.append(text(version, "gateway-version"));
+
+  const stats = element("span", "gateway-stats");
+  stats.append(
+    metric(`${active}`, "active"),
+    metric(`${agents.length}`, "agents"),
+    metric(`${sessions.length}/${total}`, "sessions"),
+    metric(`${inactive}`, "recent idle")
+  );
+  if (gateway.omittedInactiveSessions) stats.append(metric(`${gateway.omittedInactiveSessions}`, "older hidden"));
+
+  const now = element("span", `gateway-now${focus ? " live" : ""}`);
+  now.append(text(focus ? "now" : "status", "gateway-now-label"), text(focusText, "gateway-now-text"));
+  const since = text(`${gateway.connection.state} ${relative(gateway.connection.since)}`, "gateway-since");
+  since.dataset.gateway = gateway.id;
+  toggle.append(heading, stats, now, since);
+
+  const body = element("div", "gateway-body");
+  body.id = `gateway-${gateway.id}`;
+  body.hidden = !expanded;
+  for (const agent of agents.sort((a, b) => a.name.localeCompare(b.name))) body.append(renderAgent(agent, sessions.filter((session) => session.agentId === agent.id)));
+  section.append(toggle, body);
   return section;
+}
+
+function metric(value: string, label: string): HTMLElement {
+  const node = element("span", "gateway-metric");
+  node.append(text(value, "gateway-metric-value"), text(label, "gateway-metric-label"));
+  return node;
 }
 
 function renderAgent(agent: Agent, sessions: Session[]): HTMLElement {
@@ -62,7 +109,7 @@ function renderAgent(agent: Agent, sessions: Session[]): HTMLElement {
   const title = element("div", "agent-title");
   title.append(text(`${agent.emoji ?? "◇"} ${agent.name}`));
   if (agent.agentRuntime) title.append(text(agent.agentRuntime.id, "agent-runtime"));
-  title.append(text(`${sessions.length}`, "agent-count"));
+  title.append(text(`${sessions.filter((session) => session.state === "active").length} active · ${sessions.length} total`, "agent-count"));
   section.append(title);
   const byKey = new Map(sessions.map((session) => [session.key, session]));
   const explicitChildren = new Set(sessions.map((session) => session.parentSessionKey).filter((key): key is string => Boolean(key && byKey.has(key))));
@@ -143,20 +190,30 @@ function renderDetail(): void {
   progress.hidden = !session.progress;
   progress.replaceChildren();
   if (session.progress) {
-    progress.append(text(`progress ${session.progress.completed}/${session.progress.total}`, "progress-headline"));
-    if (session.progress.step) progress.append(text(`${session.progress.stepStatus === "in_progress" ? "now" : "next"}: ${session.progress.step}`, "progress-meta", "small"));
-    progress.append(text(`updated ${relative(session.progress.updatedAt)} · revision ${session.progress.revision}`, "progress-meta", "small"));
+    const percent = session.progress.total ? Math.round((session.progress.completed / session.progress.total) * 100) : 0;
+    const headline = element("div", "progress-head");
+    headline.append(text(`current work`, "progress-kicker"), text(`${session.progress.completed}/${session.progress.total}`, "progress-count"));
+    const bar = element("div", "progress-track");
+    const fill = element("span", "progress-fill");
+    fill.style.width = `${percent}%`;
+    bar.append(fill);
+    progress.append(headline);
+    if (session.progress.step) progress.append(text(session.progress.step, "progress-step"));
+    progress.append(bar, text(`updated ${relative(session.progress.updatedAt)} · revision ${session.progress.revision}`, "progress-meta", "small"));
   }
   const events = get("events");
-  events.replaceChildren(...(session.activity.length ? session.activity.map(renderEvent) : [text("No live signals received in this process.", "empty-row", "li")]));
+  events.replaceChildren(...(session.activity.length ? session.activity.map(renderEvent) : [text("No sanitized live activity received in this process.", "empty-row", "li")]));
   renderTimes();
 }
 
 function renderEvent(item: Activity): HTMLElement {
-  const row = element("li", "event");
+  const row = element("li", `event ${item.kind}`);
   const time = text(clock(item.at), "", "time");
   time.setAttribute("datetime", new Date(item.at).toISOString());
-  row.append(time, text(item.kind, "event-kind"), text(item.label), text(item.status ?? "", "event-status"));
+  const content = element("span", "event-content");
+  content.append(text(item.label, "event-label"));
+  if (item.detail) content.append(text(item.detail, "event-detail", "code"));
+  row.append(time, text(item.kind, "event-kind"), content, text(item.status ?? "", "event-status"));
   return row;
 }
 function renderTimes(): void {
@@ -167,6 +224,11 @@ function renderTimes(): void {
     const age = node.querySelector<HTMLElement>(".session-age");
     if (age && item) age.textContent = relative(item.lastSignalAt ?? item.updatedAt);
   });
+  document.querySelectorAll<HTMLElement>(".gateway-since[data-gateway]").forEach((node) => {
+    const gateway = state?.gateways[node.dataset.gateway ?? ""];
+    if (gateway) node.textContent = `${gateway.connection.state} ${relative(gateway.connection.since)}`;
+  });
+  if (state) get("metric-updated").textContent = relative(state.updatedAt);
 }
 function initialSelection(value: State): string { return sortSessions(Object.values(value.sessions))[0]?.key ?? ""; }
 function sortSessions(items: Session[]): Session[] {

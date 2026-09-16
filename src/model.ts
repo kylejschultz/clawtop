@@ -10,6 +10,7 @@ export type SafeActivity = {
   at: number;
   kind: "agent" | "tool" | "progress" | "session";
   label: string;
+  detail?: string;
   status?: string;
   runId?: string;
 };
@@ -213,7 +214,7 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
     state: nextState,
     activeSince: nextState === "active" ? current.activeSince ?? at : undefined,
     lastSignalAt: at,
-    activity: activity ? [activity, ...current.activity].slice(0, 40) : current.activity
+    activity: activity ? mergeActivity(current.activity, activity) : current.activity
   });
   return { ...state, sessions: { ...state.sessions, [sessionKey]: next }, updatedAt: at };
 }
@@ -223,19 +224,47 @@ function normalizeActivity(event: string, value: Record<string, unknown>, nested
   if (event === "session.tool" || event.includes("tool")) {
     const tool = string(value.toolName) ?? string(value.name) ?? string(nested?.toolName) ?? string(nested?.name) ?? "tool";
     const status = string(value.status) ?? string(value.phase) ?? string(nested?.status) ?? string(nested?.phase);
-    return activity(sessionKey, at, "tool", tool, status, runId);
+    return activity(sessionKey, at, "tool", tool, status, runId, string(value.toolCallId) ?? string(nested?.toolCallId), toolDetail(tool, value, nested));
   }
   if (event === "agent") {
     const stream = string(value.stream) ?? "agent";
-    const label = string(nested?.type) ?? string(nested?.phase) ?? stream;
+    const phase = string(nested?.phase);
+    const tool = string(nested?.name) ?? string(nested?.toolName);
+    const toolCallId = string(nested?.toolCallId);
+    if (stream === "tool" || (stream === "item" && nested?.commandBearing === true)) {
+      return activity(sessionKey, at, "tool", tool ?? "tool", string(nested?.status) ?? phase, runId, toolCallId, toolDetail(tool, value, nested));
+    }
+    const label = string(nested?.type) ?? phase ?? stream;
+    if (stream === "item") return undefined;
     return activity(sessionKey, at, stream.includes("progress") || label.includes("progress") ? "progress" : "agent", label, stream, runId);
   }
   if (event.startsWith("session.")) return activity(sessionKey, at, "session", event.slice(8), string(value.status) ?? string(value.phase), runId);
   return undefined;
 }
 
-function activity(sessionKey: string, at: number, kind: SafeActivity["kind"], label: string, status?: string, runId?: string): SafeActivity {
-  return compact({ id: `${at}-${kind}-${runId ?? label}`, sessionKey, at, kind, label: label.slice(0, 120), status: status?.slice(0, 40), runId });
+function activity(sessionKey: string, at: number, kind: SafeActivity["kind"], label: string, status?: string, runId?: string, stableId?: string, detail?: string): SafeActivity {
+  return compact({ id: `${kind}-${stableId ?? `${at}-${runId ?? label}`}`, sessionKey, at, kind, label: label.slice(0, 120), detail, status: status?.slice(0, 40), runId });
+}
+function mergeActivity(items: SafeActivity[], next: SafeActivity): SafeActivity[] {
+  const current = items.find((item) => item.id === next.id);
+  const merged = current ? compact({ ...current, ...next, detail: current.detail ?? next.detail }) : next;
+  return [merged, ...items.filter((item) => item.id !== next.id)].slice(0, 40);
+}
+function toolDetail(tool: string | undefined, value: Record<string, unknown>, nested: Record<string, unknown> | undefined): string | undefined {
+  const args = record(value.args) ?? record(nested?.args);
+  const title = boundedText(string(nested?.title) ?? string(args?.title) ?? "", 160);
+  const command = tool === "exec" ? safeCommand(string(args?.command)) : undefined;
+  return [title, command].filter((item, index, all): item is string => Boolean(item && all.indexOf(item) === index)).join(" · ") || undefined;
+}
+export function safeCommand(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let text = value
+    .replace(/Bearer\s+\S+/giu, "Bearer ***")
+    .replace(/((?:token|password|passwd|secret|api[_-]?key|authorization|cookie)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s;&|]+)/giu, "$1***")
+    .replace(/(--(?:token|password|passwd|secret|api-key|authorization|cookie)(?:=|\s+))(?:"[^"]*"|'[^']*'|[^\s;&|]+)/giu, "$1***")
+    .replace(/[A-Za-z0-9+/_=-]{48,}/gu, "***");
+  text = boundedText(text, 320) ?? "";
+  return text || undefined;
 }
 function activityFromRow(row: SessionWire): ActivityState {
   if (row.hasActiveRun === true || (row.activeRunIds?.length ?? 0) > 0 || row.status === "running" || row.status === "queued") return "active";
