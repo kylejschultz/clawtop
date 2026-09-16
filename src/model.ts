@@ -53,6 +53,7 @@ export type DashboardSession = {
   parentSessionKey?: string;
   childSessions: string[];
   state: ActivityState;
+  lifecycleSince: number;
   activeSince?: number;
   updatedAt?: number;
   lastSignalAt?: number;
@@ -139,12 +140,13 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
       gatewayId,
       sessionId,
       agentId,
-      title: row.label ?? row.displayName ?? row.autoLabel ?? shortKey(row.key),
+      title: row.label ?? row.derivedTitle ?? row.displayName ?? row.autoLabel ?? shortKey(row.key),
       kind: row.kind,
       channel: row.channel,
       parentSessionKey: sessionSourceScope(gatewayId, row.parentSessionKey ?? row.spawnedBy, row.agentId),
       childSessions: (row.childSessions ?? []).map((child) => scopedSession(gatewayId, child, row.agentId)),
       state: nextState,
+      lifecycleSince: prior?.lifecycleSince ?? action.at,
       activeSince: nextState === "active" ? prior?.activeSince ?? action.at : undefined,
       updatedAt: row.lastActivityAt ?? row.updatedAt ?? undefined,
       lastSignalAt: prior?.lastSignalAt ?? row.lastActivityAt ?? row.updatedAt ?? undefined,

@@ -75,6 +75,7 @@ test("snapshot refresh preserves event details and other Gateways", () => {
   state = reduceDashboard(state, snapshot(alpha, [root({ sessionId: "stable-alpha", hasActiveRun: true })], 300));
   const session = state.sessions["alpha::agent:main:root"];
   assert.equal(session?.activeSince, 200);
+  assert.equal(session?.lifecycleSince, 200);
   assert.equal(session?.activity[0]?.label, "exec");
   assert.ok(state.sessions["beta::agent:main:root"]);
   assert.equal(JSON.stringify(state).includes("never retained"), false);
@@ -102,24 +103,29 @@ test("snapshots without a session id reset lifecycle state conservatively", () =
   state = reduceDashboard(state, snapshot(alpha, [root({ hasActiveRun: true })], 30));
   const replacement = state.sessions["alpha::agent:main:root"];
   assert.equal(replacement?.activeSince, 30);
+  assert.equal(replacement?.lifecycleSince, 30);
   assert.equal(replacement?.lastSignalAt, undefined);
   assert.deepEqual(replacement?.activity, []);
 });
 
-test("uses only explicit session titles and exposes inactive-history coverage", () => {
+test("prefers explicit and derived session titles and exposes inactive-history coverage", () => {
   const state = reduceDashboard(createState("live", 0), {
-    ...snapshot(alpha, [root({ displayName: undefined, label: undefined, autoLabel: undefined, derivedTitle: "Transcript-derived secret" })], 10),
+    ...snapshot(alpha, [
+      root({ displayName: "Channel fallback", label: undefined, derivedTitle: "First-message title" }),
+      root({ key: "explicit", displayName: "Channel fallback", label: "Renamed session", derivedTitle: "First-message title" })
+    ], 10),
     totalSessions: 275,
     activeSessions: 25,
     inactiveSessionsShown: 175,
     inactiveHistoryTruncated: true,
     omittedInactiveSessions: 75
   });
-  assert.equal(state.sessions["alpha::agent:main:root"]?.title, "root");
+  assert.equal(state.sessions["alpha::agent:main:root"]?.title, "First-message title");
+  assert.equal(state.sessions["alpha::explicit"]?.title, "Renamed session");
   assert.equal(state.gateways.alpha?.inactiveHistoryTruncated, true);
   assert.equal(state.gateways.alpha?.omittedInactiveSessions, 75);
   assert.equal(state.gateways.alpha?.totalSessions, 275);
-  assert.equal(JSON.stringify(state).includes("Transcript-derived secret"), false);
+  assert.equal(JSON.stringify(state).includes("First-message title"), true);
 });
 
 test("active run semantics distinguish idle, active, and unknown", () => {

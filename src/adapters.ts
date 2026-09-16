@@ -65,6 +65,7 @@ class LiveAdapter implements ActivityAdapter {
   private readonly gateway: GatewayRef;
   private readonly secrets: string[];
   private readonly subscriptions: ExactSessionSubscriptions;
+  private readonly sessionRequest: Request;
   private readonly readActiveSessions: () => Promise<SessionsResult | undefined>;
   private stopped = false;
   private refreshTimer?: NodeJS.Timeout;
@@ -111,8 +112,9 @@ class LiveAdapter implements ActivityAdapter {
       onGap: () => this.scheduleRefresh()
     });
     const request = (method: string, params: Record<string, unknown>) => this.client.request(method, params);
+    this.sessionRequest = createDerivedTitleRequest(request);
     this.subscriptions = new ExactSessionSubscriptions(request);
-    this.readActiveSessions = createActiveSessionFetcher(request);
+    this.readActiveSessions = createActiveSessionFetcher(this.sessionRequest);
   }
 
   start(): void {
@@ -137,7 +139,7 @@ class LiveAdapter implements ActivityAdapter {
     try {
       const [agents, recent, active] = await Promise.all([
         this.client.request<AgentsResult>("agents.list", {}),
-        subscribeSessions((method, params) => this.client.request(method, params)),
+        subscribeSessions(this.sessionRequest),
         this.readActiveSessions()
       ]);
       const nextAgents = validAgents(agents);
@@ -181,7 +183,7 @@ class LiveAdapter implements ActivityAdapter {
     const revision = ++this.snapshotRevision;
     try {
       const [recent, active] = await Promise.all([
-        this.client.request<SessionsResult>("sessions.list", { limit: SESSION_PAGE_SIZE }).then(validSessions),
+        this.sessionRequest("sessions.list", { limit: SESSION_PAGE_SIZE }).then(validSessions),
         this.readActiveSessions()
       ]);
       if (revision !== this.snapshotRevision) return;
@@ -275,6 +277,19 @@ export async function subscribeSessions(request: Request): Promise<SessionsResul
   return validSessions(await request("sessions.list", { limit: SESSION_PAGE_SIZE }));
 }
 
+export function createDerivedTitleRequest(request: Request): Request {
+  let supported = true;
+  return async (method, params) => {
+    if (!supported || (method !== "sessions.list" && method !== "sessions.subscribe")) return request(method, params);
+    try { return await request(method, { ...params, includeDerivedTitles: true }); }
+    catch (error) {
+      if (!rejectsDerivedTitles(error)) throw error;
+      supported = false;
+      return request(method, params);
+    }
+  };
+}
+
 export function createActiveSessionFetcher(request: Request): () => Promise<SessionsResult | undefined> {
   let supported = true;
   return async () => {
@@ -366,6 +381,10 @@ function isActiveSession(session: SessionWire): boolean {
 function rejectsActiveOnly(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /invalid sessions\.list params:.*unexpected property ['"]?activeOnly['"]?/iu.test(message);
+}
+function rejectsDerivedTitles(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /invalid sessions\.(?:list|subscribe) params:.*unexpected property ['"]?includeDerivedTitles['"]?/iu.test(message);
 }
 function findProgressSession(sessions: SessionWire[], key: string, agentId?: string): SessionWire | undefined {
   return sessions.find((session) => (!agentId || session.agentId === agentId) && (session.key === key || (session.key === "global" && key === `agent:${session.agentId}:global`)));

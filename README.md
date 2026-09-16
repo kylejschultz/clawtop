@@ -10,10 +10,11 @@ A small, self-hosted, **read-only** terminal-style dashboard for live OpenClaw f
 - Per-Gateway connect/reconnect/error state and server version
 - Active, idle, and unknown states without guessing unknown into idle
 - Verified runtime and placement facts when projected by the Gateway: agent runtime/harness, model provider, placement state/provider/profile, machine class/OS label, and paired-device runner availability
-- Active elapsed time, last-signal age, sanitized progress-card summaries, and safe recent signals
+- Active elapsed time, last-signal age, stable normalized work notes, sanitized progress-card summaries, and safe recent signals
+- Explicit session names with visibility-scoped, first-message-derived titles as a fallback when the Gateway supports them
 - Demo data for two Gateways with no OpenClaw configuration
 
-Clawtop never calls Gateway write/control methods or activates observer work. Tool arguments, outputs, prompts, progress-card Markdown, credentials, URLs, derived transcript titles, and raw event payloads are not retained in browser state. The browser receives only normalized labels, state, timing, source IDs, Gateway identity, and bounded status/progress fields. Recent signals are process-memory-only and capped at 40 per session.
+Clawtop never calls Gateway write/control methods or activates observer work. Tool arguments, outputs, prompts, progress-card Markdown, credentials, URLs, and raw event payloads are not retained in browser state. When supported, Clawtop requests the Gateway's visibility-scoped `derivedTitle`; an explicit session label still takes precedence. The browser otherwise receives only normalized labels, state, timing, source IDs, Gateway identity, and bounded status/progress fields. Recent signals are process-memory-only and capped at 40 per session.
 
 Unknown runtime and placement fields are omitted rather than inferred. In particular, Clawtop does not treat an absent placement, machine, or runner as local, offline, or unavailable.
 
