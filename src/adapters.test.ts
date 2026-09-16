@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createActiveSessionFetcher, ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews, subscribeSessions } from "./adapters.js";
+import { createActiveSessionFetcher, createDerivedTitleRequest, ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews, subscribeSessions } from "./adapters.js";
 import type { SessionWire } from "./model.js";
 
 const row = (key: string, agentId = "main"): SessionWire => ({ key, kind: "direct", agentId });
@@ -96,6 +96,25 @@ test("keeps the modern sessions.subscribe list without an extra read", async () 
   });
   assert.deepEqual(result.sessions, [row("modern")]);
   assert.equal(calls, 1);
+});
+
+test("requests derived titles and caches the compatibility fallback", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const request = createDerivedTitleRequest(async (method, params) => {
+    calls.push({ method, params });
+    if (params.includeDerivedTitles) throw new Error(`invalid ${method} params: at root: unexpected property 'includeDerivedTitles'`);
+    return { sessions: [row("legacy")] };
+  });
+
+  await request("sessions.list", { limit: 200 });
+  await request("sessions.list", { limit: 200 });
+  await request("agents.list", {});
+  assert.deepEqual(calls, [
+    { method: "sessions.list", params: { limit: 200, includeDerivedTitles: true } },
+    { method: "sessions.list", params: { limit: 200 } },
+    { method: "sessions.list", params: { limit: 200 } },
+    { method: "agents.list", params: {} }
+  ]);
 });
 
 test("caches the legacy sessions.list fallback when activeOnly is unsupported", async () => {

@@ -1,17 +1,23 @@
 type ActivityState = "active" | "idle" | "unknown";
 type Activity = { id: string; at: number; kind: string; label: string; detail?: string; status?: string; runId?: string };
 type ActivityView = Activity & { repeats?: number; oldestAt?: number };
+type WorkNote = { text: string; meta: string; at: number; priority: number };
+type StableWorkNote = { shown: WorkNote; shownSince: number; pending?: { note: WorkNote; since: number } };
 type Gateway = { id: string; name: string; host?: string; totalSessions?: number; activeSessions?: number; inactiveSessionsShown?: number; inactiveHistoryTruncated?: boolean; omittedInactiveSessions?: number; connection: { state: string; since: number; error?: string; serverVersion?: string } };
 type Runtime = { id: string; source: string; fallback?: string; cloudPlacementSupported?: boolean; cloudPlacementExecutionMode?: string; devicePlacementSupported?: boolean; devicePlacement?: { consumesWorkerSlot: boolean } };
 type Placement = { state: string; providerId?: string; profileId?: string; machine?: { class?: string; os?: string; osLabel?: string }; runner?: { kind: "device"; status: "available" | "offline"; deviceId?: string } };
 type Progress = { revision: number; updatedAt: number; completed: number; total: number; step?: string; stepStatus?: "in_progress" | "pending" };
-type Session = { key: string; sourceKey: string; gatewayId: string; sessionId?: string; agentId: string; title: string; kind: string; channel?: string; parentSessionKey?: string; childSessions: string[]; state: ActivityState; activeSince?: number; updatedAt?: number; lastSignalAt?: number; model?: string; modelProvider?: string; agentRuntime?: Runtime; placement?: Placement; status?: string; progress?: Progress; activity: Activity[] };
+type Session = { key: string; sourceKey: string; gatewayId: string; sessionId?: string; agentId: string; title: string; kind: string; channel?: string; parentSessionKey?: string; childSessions: string[]; state: ActivityState; lifecycleSince: number; activeSince?: number; updatedAt?: number; lastSignalAt?: number; model?: string; modelProvider?: string; agentRuntime?: Runtime; placement?: Placement; status?: string; progress?: Progress; activity: Activity[] };
 type Agent = { id: string; sourceId: string; gatewayId: string; name: string; emoji?: string; model?: string; agentRuntime?: Runtime };
 type State = { mode: "demo" | "live"; gateways: Record<string, Gateway>; agents: Record<string, Agent>; sessions: Record<string, Session>; updatedAt: number };
 
 let state: State | undefined;
 let selected = "";
 let browserConnected = false;
+let renderedWorkNotes = new Map<string, WorkNote | undefined>();
+let noteRefreshTimer: number | undefined;
+let noteRefreshAt = 0;
+const stableWorkNotes = new Map<string, StableWorkNote>();
 const expandedGateways = new Set<string>();
 const tree = get("tree");
 const detailContent = get("detail-content") as HTMLElement;
@@ -37,6 +43,9 @@ function render(): void {
   const active = sessions.filter((session) => session.state === "active").length;
   const connected = gateways.filter((gateway) => gateway.connection.state === "connected").length;
   const hidden = gateways.reduce((sum, gateway) => sum + (gateway.omittedInactiveSessions ?? 0), 0);
+  renderedWorkNotes = new Map();
+  const sessionKeys = new Set(sessions.map(noteCacheKey));
+  for (const key of stableWorkNotes.keys()) if (!sessionKeys.has(key)) stableWorkNotes.delete(key);
   get("metric-gateways").textContent = `${connected}/${gateways.length}`;
   get("metric-agents").textContent = String(agents.length);
   get("metric-sessions").textContent = String(sessions.length);
@@ -67,8 +76,10 @@ function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): 
   });
 
   const active = gateway.activeSessions ?? sessions.filter((session) => session.state === "active").length;
-  const focus = sortSessions(sessions.filter((session) => session.state === "active"))[0];
-  const focusText = focus?.progress?.step ?? focus?.title ?? "No active sessions";
+  const activeFocus = sortSessions(sessions.filter((session) => session.state === "active"))[0];
+  const focus = activeFocus ?? sortSessions(sessions).find((session) => Boolean(workNoteCandidate(session)));
+  const note = focus ? workNote(focus) : undefined;
+  const focusText = note?.text ?? focus?.title ?? "No recent work";
   const emoji = agents.find((agent) => agent.sourceId === "main")?.emoji ?? agents.find((agent) => agent.emoji)?.emoji;
   const heading = element("span", "gateway-heading");
   heading.append(text("", `gateway-caret${expanded ? " open" : ""}`));
@@ -82,8 +93,8 @@ function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): 
   const stats = element("span", "gateway-stats");
   stats.append(metric(`${active}`, "active"), metric(`${agents.length}`, "agents"));
 
-  const now = element("span", `gateway-now${focus ? " live" : ""}`);
-  now.append(text(focus ? "now" : "status", "gateway-now-label"), text(focusText, "gateway-now-text"));
+  const now = element("span", `gateway-now${activeFocus ? " live" : ""}`);
+  now.append(text(activeFocus ? "now" : note ? "last" : "status", "gateway-now-label"), text(focusText, "gateway-now-text"));
   const since = text(`${gateway.connection.state} ${relative(gateway.connection.since)}`, "gateway-since");
   since.dataset.gateway = gateway.id;
   toggle.append(heading, stats, now, since);
@@ -132,7 +143,8 @@ function appendSession(parent: HTMLElement, session: Session, byKey: Map<string,
   button.addEventListener("click", () => { selected = session.key; render(); });
   button.append(text("", `dot ${session.state}`));
   const label = element("span", "session-title");
-  label.append(text(session.title), text(`${session.kind}${session.channel ? ` · ${session.channel}` : ""}${session.placement ? ` · ${session.placement.state}` : ""}`, "session-meta"));
+  const note = workNote(session);
+  label.append(text(session.title), text(note?.text ?? `${session.kind}${session.channel ? ` · ${session.channel}` : ""}`, "session-meta"));
   button.append(label, text(relative(session.lastSignalAt ?? session.updatedAt), "session-age"));
   parent.append(button);
   const children = new Set(session.childSessions);
@@ -167,37 +179,32 @@ function renderDetail(): void {
   const facts = get("facts");
   facts.replaceChildren();
   const agent = state?.agents[session.agentId];
-  const runtime = session.agentRuntime ?? agent?.agentRuntime;
   addFact(facts, "gateway", state?.gateways[session.gatewayId]?.name ?? session.gatewayId);
   addFact(facts, "agent", agent?.name ?? session.agentId);
-  addFact(facts, "session", session.sourceKey);
-  addFact(facts, "model", session.model);
-  addFact(facts, "model provider", session.modelProvider);
-  addFact(facts, "agent runtime / harness", runtime ? `${runtime.id} · source ${runtime.source}` : undefined);
-  addFact(facts, "runtime fallback", runtime?.fallback);
-  addFact(facts, "cloud placement", support(runtime?.cloudPlacementSupported, runtime?.cloudPlacementExecutionMode));
-  addFact(facts, "device placement", support(runtime?.devicePlacementSupported, runtime?.devicePlacement ? runtime.devicePlacement.consumesWorkerSlot ? "uses worker slot" : "no worker slot" : undefined));
-  addFact(facts, "placement state", session.placement?.state);
-  addFact(facts, "placement provider", session.placement?.providerId);
-  addFact(facts, "placement profile", session.placement?.profileId);
-  addFact(facts, "machine", machine(session.placement?.machine));
-  addFact(facts, "runner / device", session.placement?.runner ? `${session.placement.runner.status}${session.placement.runner.deviceId ? ` · ${session.placement.runner.deviceId}` : ""}` : undefined);
+  addFact(facts, "model", modelSummary(session.model, session.modelProvider));
+  addFact(facts, "execution", executionSummary(session.placement));
   addFact(facts, "runtime status", session.status);
   addFact(facts, "last signal", session.lastSignalAt || session.updatedAt ? relative(session.lastSignalAt ?? session.updatedAt) : undefined);
   const progress = get("progress") as HTMLElement;
-  progress.hidden = !session.progress;
+  const note = workNote(session);
+  progress.hidden = !session.progress && !note;
   progress.replaceChildren();
-  if (session.progress) {
-    const percent = session.progress.total ? Math.round((session.progress.completed / session.progress.total) * 100) : 0;
+  if (session.progress || note) {
     const headline = element("div", "progress-head");
-    headline.append(text(`current work`, "progress-kicker"), text(`${session.progress.completed}/${session.progress.total}`, "progress-count"));
-    const bar = element("div", "progress-track");
-    const fill = element("span", "progress-fill");
-    fill.style.width = `${percent}%`;
-    bar.append(fill);
+    headline.append(text(session.state === "active" ? "current work" : "last work", "progress-kicker"));
+    if (session.progress) headline.append(text(`${session.progress.completed}/${session.progress.total}`, "progress-count"));
     progress.append(headline);
-    if (session.progress.step) progress.append(text(session.progress.step, "progress-step"));
-    progress.append(bar, text(`updated ${relative(session.progress.updatedAt)} · revision ${session.progress.revision}`, "progress-meta", "small"));
+    if (note) progress.append(text(note.text, "progress-step"));
+    if (session.progress) {
+      const percent = session.progress.total ? Math.round((session.progress.completed / session.progress.total) * 100) : 0;
+      const bar = element("div", "progress-track");
+      const fill = element("span", "progress-fill");
+      fill.style.width = `${percent}%`;
+      bar.append(fill);
+      progress.append(bar);
+    }
+    const meta = [note?.meta, note ? relative(note.at) : undefined, session.progress ? `revision ${session.progress.revision}` : undefined].filter(Boolean).join(" · ");
+    if (meta) progress.append(text(meta, "progress-meta", "small"));
   }
   renderActivity(session.activity);
   renderTimes();
@@ -206,20 +213,6 @@ function renderDetail(): void {
 function renderActivity(items: Activity[]): void {
   const tools = items.filter((item) => item.kind === "tool").length;
   get("activity-summary").textContent = items.length ? `${items.length} signals · ${tools} tool action${tools === 1 ? "" : "s"}` : "waiting for activity";
-  const current = get("current-activity") as HTMLElement;
-  current.hidden = items.length === 0;
-  current.replaceChildren();
-  const latest = items[0];
-  if (latest) {
-    const concrete = latest.kind === "agent" && latest.label === "thinking" ? items.find((item) => (item.kind === "tool" || item.kind === "progress") && item.runId === latest.runId && latest.at - item.at <= 60_000) : undefined;
-    const head = element("div", "current-activity-head");
-    const age = text(relative(latest.at), "current-activity-age");
-    age.dataset.at = String(latest.at);
-    head.append(text("Latest signal", "current-activity-kicker"), age);
-    current.append(head, text(activityLabel(latest), "current-activity-title"));
-    const detail = latest.detail ?? (concrete ? `Latest concrete action: ${concrete.detail ?? activityLabel(concrete)}` : activityDescription(latest));
-    if (detail) current.append(text(detail, "current-activity-detail", "code"));
-  }
   const events = get("events");
   events.replaceChildren(...(items.length ? activityRows(items).map(renderEvent) : [text("No sanitized live activity received in this process.", "empty-row", "li")]));
 }
@@ -252,10 +245,13 @@ function renderEvent(item: ActivityView): HTMLElement {
   age.dataset.at = String(item.at);
   time.append(absolute, age);
   const content = element("span", "event-content");
-  content.append(text(activityLabel(item), "event-label"));
-  const description = item.detail ?? activityDescription(item);
-  const detail = item.repeats && item.repeats > 1 ? `${item.repeats} similar signals over ${duration(item.at - (item.oldestAt ?? item.at))}${description ? ` · ${description}` : ""}` : description;
-  if (detail) content.append(text(detail, "event-detail", "code"));
+  const label = activityLabel(item);
+  const description = activityDescription(item);
+  const repeated = item.repeats && item.repeats > 1 ? `${item.repeats} similar signals over ${duration(item.at - (item.oldestAt ?? item.at))}` : undefined;
+  const primary = item.detail ?? label;
+  const secondary = item.detail ? [label, repeated].filter(Boolean).join(" · ") : [repeated, description].filter(Boolean).join(" · ");
+  content.append(text(primary, "event-label", item.detail ? "code" : "span"));
+  if (secondary) content.append(text(secondary, "event-detail"));
   const meta = element("span", "event-meta");
   if (item.status) meta.append(text(item.status, "event-status"));
   if (item.runId) meta.append(text(`run ${item.runId.slice(0, 8)}`, "event-run"));
@@ -286,6 +282,73 @@ function activityDescription(item: Activity): string | undefined {
   if (item.kind === "tool") return `Tool activity${item.status ? ` · ${item.status}` : ""}.`;
   return undefined;
 }
+
+function workNote(session: Session): WorkNote | undefined {
+  const key = noteCacheKey(session);
+  if (renderedWorkNotes.has(key)) return renderedWorkNotes.get(key);
+  const candidate = workNoteCandidate(session);
+  const now = Date.now();
+  const stable = stableWorkNotes.get(key);
+  if (!candidate) {
+    const shown = stable?.shown;
+    renderedWorkNotes.set(key, shown);
+    return shown;
+  }
+  if (!stable) {
+    stableWorkNotes.set(key, { shown: candidate, shownSince: now });
+    renderedWorkNotes.set(key, candidate);
+    return candidate;
+  }
+  if (stable.shown.text === candidate.text) {
+    stable.shown = candidate;
+    stable.pending = undefined;
+    renderedWorkNotes.set(key, candidate);
+    return candidate;
+  }
+  const immediate = candidate.priority >= 5;
+  if (immediate) {
+    stable.shown = candidate;
+    stable.shownSince = now;
+    stable.pending = undefined;
+  } else {
+    if (stable.pending?.note.text !== candidate.text) stable.pending = { note: candidate, since: now };
+    else stable.pending.note = candidate;
+    const due = Math.max(stable.shownSince + 5_000, stable.pending.since + 2_000);
+    if (now >= due) {
+      stable.shown = stable.pending.note;
+      stable.shownSince = now;
+      stable.pending = undefined;
+    } else scheduleNoteRefresh(due);
+  }
+  renderedWorkNotes.set(key, stable.shown);
+  return stable.shown;
+}
+
+function workNoteCandidate(session: Session): WorkNote | undefined {
+  const item = session.activity.find((activity) => activity.label === "error" || activity.status === "error" || activity.kind === "tool" || (activity.kind === "progress" && Boolean(activity.detail)) || (activity.kind === "agent" && activity.label === "final_answer"));
+  if (session.progress?.step && session.progress.updatedAt >= (item?.at ?? 0)) {
+    return { text: session.progress.step, meta: `progress · ${session.progress.completed}/${session.progress.total}`, at: session.progress.updatedAt, priority: 4 };
+  }
+  if (item) {
+    const status = item.status ? ` · ${item.status}` : "";
+    return { text: item.detail ?? activityLabel(item), meta: `${item.kind} · ${activityLabel(item)}${status}`, at: item.at, priority: item.label === "error" || item.status === "error" ? 5 : 3 };
+  }
+  if (session.state === "active") return { text: "Model working", meta: "agent · active", at: session.lastSignalAt ?? session.updatedAt ?? Date.now(), priority: 1 };
+  return undefined;
+}
+
+function noteCacheKey(session: Session): string { return `${session.key}\u0000${session.lifecycleSince}`; }
+function scheduleNoteRefresh(at: number): void {
+  if (noteRefreshTimer !== undefined && noteRefreshAt <= at) return;
+  if (noteRefreshTimer !== undefined) window.clearTimeout(noteRefreshTimer);
+  noteRefreshAt = at;
+  noteRefreshTimer = window.setTimeout(() => {
+    noteRefreshTimer = undefined;
+    noteRefreshAt = 0;
+    if (state) render();
+  }, Math.max(0, at - Date.now()));
+}
+
 function renderTimes(): void {
   const session = state?.sessions[selected];
   if (session) get("elapsed").textContent = session.state === "active" && session.activeSince ? `elapsed ${duration(Date.now() - session.activeSince)}` : `last ${relative(session.lastSignalAt ?? session.updatedAt)}`;
@@ -298,7 +361,7 @@ function renderTimes(): void {
     const gateway = state?.gateways[node.dataset.gateway ?? ""];
     if (gateway) node.textContent = `${gateway.connection.state} ${relative(gateway.connection.since)}`;
   });
-  document.querySelectorAll<HTMLElement>(".event-age[data-at], .current-activity-age[data-at]").forEach((node) => {
+  document.querySelectorAll<HTMLElement>(".event-age[data-at]").forEach((node) => {
     const at = Number(node.dataset.at);
     if (Number.isFinite(at)) node.textContent = relative(at);
   });
@@ -321,7 +384,18 @@ function duration(milliseconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 function clock(at: number): string { return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
-function support(value: boolean | undefined, detail?: string): string | undefined { return value === undefined ? undefined : `${value ? "supported" : "not supported"}${detail ? ` · ${detail}` : ""}`; }
+function modelSummary(model?: string, provider?: string): string | undefined {
+  const providerLabel = provider === "openai" ? "OpenAI" : provider === "anthropic" ? "Anthropic" : provider;
+  if (!model) return providerLabel;
+  const name = provider && model.startsWith(`${provider}/`) ? model.slice(provider.length + 1) : model;
+  return providerLabel ? `${name} · ${providerLabel}` : name;
+}
+function executionSummary(placement?: Placement): string | undefined {
+  if (!placement || placement.state === "local" || placement.state === "requested") return undefined;
+  const target = placement.runner?.deviceId ?? placement.profileId ?? placement.providerId;
+  const host = [target, machine(placement.machine)].filter(Boolean).join(" · ");
+  return `${placement.runner ? "device" : placement.state}${host ? ` · ${host}` : ""}${placement.runner ? ` · ${placement.runner.status}` : ""}`;
+}
 function machine(value: Placement["machine"]): string | undefined {
   if (!value) return undefined;
   return [value.class, value.osLabel ?? value.os].filter(Boolean).join(" · ") || undefined;

@@ -84,7 +84,7 @@ h1, h3 { margin-top: .12rem; color: var(--text); font-size: 10px; letter-spacing
 .session:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 .session.selected { background: var(--accent-dim); border-left-color: var(--accent); }
 .session-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.session-meta { display: block; margin-top: .18rem; color: var(--muted); font-size: 9px; }
+.session-meta { display: block; overflow: hidden; margin-top: .18rem; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .session-age { color: var(--muted); font-size: 9px; }
 .dot { width: .52rem; height: .52rem; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1px #0b161c; }
 .dot.active { background: var(--green); box-shadow: 0 0 8px rgba(121,221,177,.65); }
@@ -92,7 +92,7 @@ h1, h3 { margin-top: .12rem; color: var(--text); font-size: 10px; letter-spacing
 .dot.unknown { background: #647986; }
 
 .detail { overflow: hidden; background: var(--bg); }
-.detail-content { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(190px, 43%) minmax(0, 57%); }
+.detail-content { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(170px, 38%) minmax(0, 62%); }
 .empty { height: 100%; display: grid; place-items: center; padding: 2rem; color: var(--muted); }
 .session-overview { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 1rem 1.1rem .8rem; border-bottom: 1px solid var(--line-strong); background: linear-gradient(180deg, #0a151d, #081119); }
 .detail-head { display: flex; justify-content: space-between; align-items: start; gap: 1rem; border-bottom: 1px solid var(--line); padding-bottom: .7rem; }
@@ -113,15 +113,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .progress-track { height: 3px; margin-top: .55rem; overflow: hidden; background: #091016; }
 .progress-fill { display: block; height: 100%; background: linear-gradient(90deg, #378da5, var(--accent)); }
 .progress-meta { display: block; color: var(--muted); margin-top: .35rem; }
-.activity-panel { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; background: #081119; }
+.activity-panel { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; background: #081119; }
 .activity-head { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding: .68rem .85rem; border-bottom: 1px solid var(--line); background: var(--panel); }
 .activity-head > span { color: var(--muted); font-size: 9px; text-align: right; }
-.current-activity { padding: .72rem .85rem .78rem; border-bottom: 1px solid var(--line-strong); border-left: 3px solid var(--accent); background: linear-gradient(100deg, #0d202a, #0a171f); }
-.current-activity-head { display: flex; justify-content: space-between; gap: 1rem; }
-.current-activity-kicker { color: var(--accent); font-size: 8px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-.current-activity-age { color: var(--muted); font-size: 9px; }
-.current-activity-title { display: block; margin-top: .24rem; color: var(--accent-strong); font-weight: 800; }
-.current-activity-detail { display: -webkit-box; margin-top: .28rem; overflow: hidden; color: #b9d2dd; font: inherit; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .events { min-height: 0; overflow: auto; overscroll-behavior: contain; list-style: none; padding: 0; margin: 0; }
 .event { display: grid; grid-template-columns: 5.4rem 4.4rem minmax(0,1fr) 5.6rem; gap: .65rem; align-items: start; padding: .58rem .8rem; border-bottom: 1px solid #142733; }
 .event:hover { background: #0b1821; }
@@ -158,7 +152,7 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
   main { display: block; overflow: visible; }
   .rail { height: 55vh; border-right: 0; border-bottom: 1px solid var(--line-strong); }
   .detail { height: 70vh; }
-  .detail-content { grid-template-rows: minmax(190px, 48%) minmax(0, 52%); }
+  .detail-content { grid-template-rows: minmax(185px, 42%) minmax(0, 58%); }
   .gateway-toggle { grid-template-columns: 1fr; grid-template-areas: "heading" "stats" "now" "since"; }
   .gateway-since { justify-self: start; }
   footer { display: none; }
