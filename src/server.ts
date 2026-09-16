@@ -60,17 +60,18 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     } catch (error) { return json(response, 400, { error: safeError(error) }); }
   }
   if (request.method === "GET" && path === "/api/history/sessions") {
-    const before = positive(url.searchParams.get("before"), Number.MAX_SAFE_INTEGER);
     const limit = positive(url.searchParams.get("limit"), 25);
-    return json(response, 200, history.page(before, Math.min(limit, 100)));
+    const cursor = boundedCursor(url.searchParams.get("cursor"));
+    if (cursor === null) return json(response, 400, { error: "invalid cursor" });
+    return json(response, 200, history.page(cursor, Math.min(limit, 100)));
   }
   if (request.method === "GET" && path === "/api/history/events") {
     const key = url.searchParams.get("historyId");
     if (!key || key.length > 500) return json(response, 400, { error: "valid historyId required" });
-    const before = positive(url.searchParams.get("before"), Number.MAX_SAFE_INTEGER);
     const limit = Math.min(positive(url.searchParams.get("limit"), 40), 100);
-    const items = history.activities(key, limit + 1, before);
-    return json(response, 200, { events: items.slice(0, limit), nextBefore: items.length > limit ? items[limit - 1]?.at : undefined });
+    const cursor = boundedCursor(url.searchParams.get("cursor"));
+    if (cursor === null) return json(response, 400, { error: "invalid cursor" });
+    return json(response, 200, history.activityPage(key, limit, cursor));
   }
   if (request.method === "GET" && path === "/api/health") {
     const state = store.get(), allGateways = Object.values(state.gateways), sessions = Object.values(state.sessions);
@@ -123,6 +124,7 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 }
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function positive(value: string | null, fallback: number): number { const parsed = Number(value); return value !== null && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback; }
+function boundedCursor(value: string | null): string | undefined | null { return value === null ? undefined : value.length <= 1000 ? value : null; }
 function safeError(error: unknown): string { return (error instanceof Error ? error.message : String(error)).replace(/Bearer\s+\S+/giu, "Bearer ***").slice(0, 300); }
 function setSecurityHeaders(response: ServerResponse): void {
   response.setHeader("content-security-policy", "default-src 'self'; connect-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");

@@ -82,7 +82,8 @@ export type DashboardAction =
   | { type: "event"; gateway: GatewayRef; event: string; payload: unknown; at: number }
   | { type: "removeGateway"; gatewayId: string; at: number };
 
-export type SessionWire = SessionRow & {
+export type SessionWire = Omit<SessionRow, "status"> & {
+  status?: string;
   hasActiveRun?: boolean;
   activeRunIds?: string[] | null;
   hasActiveSubagentRun?: boolean;
@@ -167,10 +168,11 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
     });
   }
   const previousConnection = state.gateways[gatewayId]?.connection;
+  const liveSessions = Object.values(sessions).filter((session) => session.gatewayId === gatewayId);
   const gateway = {
     ...action.gateway,
     totalSessions: action.totalSessions,
-    activeSessions: action.activeSessions,
+    activeSessions: liveSessions.filter((session) => session.state === "active").length,
     inactiveSessionsShown: action.inactiveSessionsShown,
     inactiveHistoryTruncated: action.inactiveHistoryTruncated,
     omittedInactiveSessions: action.omittedInactiveSessions,
@@ -208,24 +210,37 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
 
   const activity = normalizeActivity(event, value, nested, sessionKey, at);
   let nextState = current.state;
+  let nextStatus = current.status;
   if (event === "sessions.changed") {
-    if (typeof value.hasActiveRun === "boolean") nextState = value.hasActiveRun ? "active" : "idle";
+    const status = string(value.status)?.trim().toLowerCase();
+    nextStatus = status ?? current.status;
+    if (isTerminalStatus(status)) nextState = "idle";
+    else if (status === "running" || status === "queued") nextState = "active";
+    else if (typeof value.hasActiveRun === "boolean") nextState = value.hasActiveRun ? "active" : "idle";
     else if (Array.isArray(value.activeRunIds)) nextState = value.activeRunIds.length ? "active" : "idle";
   } else if (event === "agent") {
     const stream = string(value.stream);
-    const dataType = string(nested?.type);
-    if (stream === "lifecycle" && (dataType === "end" || dataType === "error")) nextState = "idle";
-    else nextState = "active";
+    const phase = string(nested?.type) ?? string(nested?.phase);
+    const commandPhase = string(nested?.phase) ?? string(nested?.status);
+    if (stream === "lifecycle" && (phase === "end" || phase === "error")) nextState = "idle";
+    else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) nextState = "active";
   }
 
   const next: DashboardSession = compact({
     ...current,
     state: nextState,
+    status: nextStatus,
     activeSince: nextState === "active" ? current.activeSince ?? at : undefined,
     lastSignalAt: at,
     activity: activity ? mergeActivity(current.activity, activity) : current.activity
   });
-  return { ...state, sessions: { ...state.sessions, [sessionKey]: next }, updatedAt: at };
+  const sessions = { ...state.sessions, [sessionKey]: next };
+  const currentGateway = state.gateways[gateway.id];
+  const gateways = currentGateway ? {
+    ...state.gateways,
+    [gateway.id]: { ...currentGateway, activeSessions: Object.values(sessions).filter((session) => session.gatewayId === gateway.id && session.state === "active").length }
+  } : state.gateways;
+  return { ...state, gateways, sessions, updatedAt: at };
 }
 
 function normalizeActivity(event: string, value: Record<string, unknown>, nested: Record<string, unknown> | undefined, sessionKey: string, at: number): SafeActivity | undefined {
@@ -283,11 +298,15 @@ function redactSensitiveText(value: string | undefined, limit: number): string |
     .replace(/[A-Za-z0-9+/_=-]{48,}/gu, "***");
   return boundedText(text, limit);
 }
-function activityFromRow(row: SessionWire): ActivityState {
-  if (row.hasActiveRun === true || (row.activeRunIds?.length ?? 0) > 0 || row.status === "running" || row.status === "queued") return "active";
-  if (row.hasActiveRun === false || Array.isArray(row.activeRunIds) || ["done", "failed", "killed", "timeout"].includes(row.status ?? "")) return "idle";
+export function activityFromRow(row: SessionWire): ActivityState {
+  const status = row.status?.trim().toLowerCase();
+  if (isTerminalStatus(status)) return "idle";
+  if (status === "running" || status === "queued" || row.hasActiveRun === true || row.hasActiveSubagentRun === true || (row.activeRunIds?.length ?? 0) > 0) return "active";
+  if (row.hasActiveRun === false || Array.isArray(row.activeRunIds)) return "idle";
   return "unknown";
 }
+const TERMINAL_STATUSES = new Set(["done", "completed", "complete", "finished", "succeeded", "success", "failed", "error", "cancelled", "canceled", "aborted", "killed", "terminated", "timeout", "timed_out", "stopped", "idle", "skipped"]);
+export function isTerminalStatus(status: string | undefined): boolean { return Boolean(status && TERMINAL_STATUSES.has(status)); }
 function projectRuntime(runtime: GatewayAgentRuntime | undefined): DashboardRuntime | undefined {
   if (!runtime) return undefined;
   return compact({

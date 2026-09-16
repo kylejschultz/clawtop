@@ -2,7 +2,8 @@ import { statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { DashboardSession, DashboardState, SafeActivity } from "./model.js";
 
-export type HistoryPage = { sessions: DashboardSession[]; nextBefore?: number };
+export type HistoryPage = { sessions: DashboardSession[]; nextCursor?: string };
+export type ActivityPage = { events: SafeActivity[]; nextCursor?: string };
 
 type StoredSession = Pick<DashboardSession, "key" | "sourceKey" | "gatewayId" | "sessionId" | "agentId" | "kind" | "channel" | "parentSessionKey" | "childSessions" | "state" | "lifecycleSince" | "activeSince" | "updatedAt" | "lastSignalAt" | "status">;
 
@@ -60,28 +61,40 @@ export class HistoryStore {
     return { ...session, historyId, activity: activity.length ? merge(session.activity, activity).slice(0, limit) : session.activity };
   }
 
-  page(before = Number.MAX_SAFE_INTEGER, limit = 25): HistoryPage {
+  page(cursor: string | undefined = undefined, limit = 25): HistoryPage {
     const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const rows = this.db.prepare("SELECT history_id,metadata,updated_at FROM sessions WHERE updated_at < ? ORDER BY updated_at DESC,history_id LIMIT ?").all(before, bounded + 1) as Array<{ history_id: string; metadata: string; updated_at: number }>;
+    const before = decodeCursor(cursor);
+    const rows = this.db.prepare("SELECT history_id,metadata,updated_at FROM sessions WHERE updated_at < ? OR (updated_at = ? AND history_id > ?) ORDER BY updated_at DESC,history_id ASC LIMIT ?").all(before.at, before.at, before.id, bounded + 1) as Array<{ history_id: string; metadata: string; updated_at: number }>;
     const more = rows.length > bounded;
     const selected = rows.slice(0, bounded);
     const sessions = selected.flatMap((row) => {
       try {
         const stored = JSON.parse(row.metadata) as StoredSession;
-        return [{ ...stored, key: row.history_id, historyId: row.history_id, title: "Historical session", activity: this.activityRows(row.history_id, row.history_id, 40) }];
+        return [{ ...stored, key: row.history_id, historyId: row.history_id, title: "Historical session", state: "idle" as const, activeSince: undefined, activity: this.activityRows(row.history_id, row.history_id, 40) }];
       } catch { return []; }
     });
-    return { sessions, nextBefore: more ? selected.at(-1)?.updated_at : undefined };
+    const last = selected.at(-1);
+    return { sessions, nextCursor: more && last ? encodeCursor(last.updated_at, last.history_id) : undefined };
   }
 
-  activities(historyId: string, limit = 40, before = Number.MAX_SAFE_INTEGER): SafeActivity[] {
+  activities(historyId: string, limit = 40): SafeActivity[] { return this.activityPage(historyId, limit).events; }
+
+  activityPage(historyId: string, limit = 40, cursor?: string): ActivityPage {
     const row = this.db.prepare("SELECT live_key FROM sessions WHERE history_id=?").get(historyId) as { live_key: string } | undefined;
-    return row ? this.activityRows(historyId, row.live_key, limit, before) : [];
+    if (!row) return { events: [] };
+    const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
+    const before = decodeCursor(cursor);
+    const rows = this.db.prepare("SELECT id,at,kind,label,status,run_id FROM events WHERE history_id=? AND (at < ? OR (at = ? AND id > ?)) ORDER BY at DESC,id ASC LIMIT ?").all(historyId, before.at, before.at, before.id, bounded + 1) as Array<{ id: string; at: number; kind: SafeActivity["kind"]; label: string; status: string | null; run_id: string | null }>;
+    const more = rows.length > bounded;
+    const selected = rows.slice(0, bounded);
+    const events = selected.map((item) => activityRow(item, row.live_key));
+    const last = selected.at(-1);
+    return { events, nextCursor: more && last ? encodeCursor(last.at, last.id) : undefined };
   }
 
   private activityRows(historyId: string, sessionKey: string, limit: number, before = Number.MAX_SAFE_INTEGER): SafeActivity[] {
-    const rows = this.db.prepare("SELECT id,at,kind,label,status,run_id FROM events WHERE history_id=? AND at<? ORDER BY at DESC LIMIT ?").all(historyId, before, Math.max(1, Math.min(100, Math.trunc(limit)))) as Array<{ id: string; at: number; kind: SafeActivity["kind"]; label: string; status: string | null; run_id: string | null }>;
-    return rows.map((row) => compact({ id: row.id, sessionKey, at: row.at, kind: row.kind, label: row.label, status: row.status ?? undefined, runId: row.run_id ?? undefined }));
+    const rows = this.db.prepare("SELECT id,at,kind,label,status,run_id FROM events WHERE history_id=? AND at<? ORDER BY at DESC,id ASC LIMIT ?").all(historyId, before, Math.max(1, Math.min(100, Math.trunc(limit)))) as Array<{ id: string; at: number; kind: SafeActivity["kind"]; label: string; status: string | null; run_id: string | null }>;
+    return rows.map((row) => activityRow(row, sessionKey));
   }
 
   prune(now = Date.now()): void {
@@ -117,5 +130,17 @@ function merge(current: SafeActivity[], stored: SafeActivity[]): SafeActivity[] 
   const values = new Map(stored.map((item) => [item.id, item]));
   for (const item of current) values.set(item.id, item);
   return [...values.values()].sort((a, b) => b.at - a.at);
+}
+function activityRow(row: { id: string; at: number; kind: SafeActivity["kind"]; label: string; status: string | null; run_id: string | null }, sessionKey: string): SafeActivity {
+  return compact({ id: row.id, sessionKey, at: row.at, kind: row.kind, label: row.label, status: row.status ?? undefined, runId: row.run_id ?? undefined });
+}
+function encodeCursor(at: number, id: string): string { return Buffer.from(JSON.stringify([at, id])).toString("base64url"); }
+function decodeCursor(cursor: string | undefined): { at: number; id: string } {
+  if (!cursor) return { at: Number.MAX_SAFE_INTEGER, id: "" };
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (Array.isArray(value) && Number.isSafeInteger(value[0]) && typeof value[1] === "string") return { at: value[0], id: value[1] };
+  } catch { /* invalid cursors start from the first page */ }
+  return { at: Number.MAX_SAFE_INTEGER, id: "" };
 }
 function compact<T extends object>(value: T): T { return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T; }

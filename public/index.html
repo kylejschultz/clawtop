@@ -20,19 +20,23 @@
     <div class="hero-metrics" aria-label="Fleet totals">
       <div class="hero-metric"><span id="metric-gateways">0/0</span><small>gateways</small></div>
       <div class="hero-metric"><span id="metric-agents">0</span><small>agents</small></div>
-      <div class="hero-metric"><span id="metric-sessions">0</span><small>sessions shown</small></div>
-      <div class="hero-metric active"><span id="metric-active">0</span><small>active now</small></div>
+      <div class="hero-metric"><span id="metric-sessions">0</span><small>live sessions</small></div>
+      <div class="hero-metric active"><span id="metric-active">0</span><small>live active now</small></div>
       <div class="hero-metric"><span id="metric-updated">never</span><small>last signal</small></div>
     </div>
   </header>
   <main>
     <section class="rail" aria-labelledby="activity-title">
       <div class="section-head">
-        <div><span class="section-kicker">Fleet index</span><h1 id="activity-title">gateways / agents / sessions</h1></div>
+        <div><span class="section-kicker">Workspace</span><h1 id="activity-title">Gateways, agents, and sessions</h1></div>
         <span id="counts">0 shown</span>
       </div>
+      <div class="view-switch" role="group" aria-label="Session view">
+        <button id="view-live" type="button" aria-pressed="true">Live</button>
+        <button id="view-history" type="button" aria-pressed="false">History</button>
+      </div>
       <div id="tree" class="tree" aria-live="polite"></div>
-      <button id="load-history" class="load-history" type="button">Load older sessions</button>
+      <div id="history-state" class="page-state" role="status" aria-live="polite" hidden></div>
     </section>
     <section id="detail" class="detail" aria-labelledby="detail-title" tabindex="-1">
       <div id="empty" class="empty">Select a session to inspect its safe live projection.</div>
@@ -47,11 +51,11 @@
         </section>
         <section class="activity-panel" aria-labelledby="activity-stream-title">
           <div class="activity-head">
-            <div><span class="section-kicker">Selected session</span><h3 id="activity-stream-title">live workstream</h3></div>
+            <div><span class="section-kicker">Selected session</span><h3 id="activity-stream-title">Workstream</h3></div>
             <span id="activity-summary">waiting for activity</span>
           </div>
           <ol id="events" class="events"></ol>
-          <button id="load-events" class="load-history" type="button">Load older activity</button>
+          <div id="event-page-state" class="page-state" role="status" aria-live="polite" hidden></div>
         </section>
       </div>
     </section>

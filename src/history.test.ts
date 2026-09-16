@@ -21,7 +21,7 @@ test("durable history stores only structural activity and omits commands and tit
   const event = reduceDashboard(state, { type: "event", gateway, event: "session.tool", payload: { sessionKey: "session", toolName: "exec", status: "completed", args: { title, command: credential } }, at: 20 });
   history.persist(state, event);
   const restored = history.restore({ ...event.sessions["one::session"]!, activity: [] });
-  const page = history.page(Number.MAX_SAFE_INTEGER, 1);
+  const page = history.page(undefined, 1);
   assert.equal(restored.activity[0]?.label, "exec");
   assert.equal(restored.activity[0]?.detail, undefined);
   assert.equal(page.sessions[0]?.title, "Historical session");
@@ -73,5 +73,54 @@ test("preserves two generations that reuse one live session key", () => {
   assert.equal(generations.length, 2);
   assert.notEqual(generations[0]?.historyId, generations[1]?.historyId);
   assert.deepEqual(generations.map((item) => history.activities(item.historyId!)[0]?.status).sort(), ["first", "second"]);
+  history.close();
+});
+
+test("history pages never expose persisted sessions as live active", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "clawtop-history-")), "history.sqlite");
+  const history = new HistoryStore(path);
+  const empty = createState("live", 1);
+  const active = reduceDashboard(empty, { type: "snapshot", gateway, agents: [], sessions: [{ key: "active", sessionId: "run", kind: "direct", hasActiveRun: true }], at: 10 });
+  history.persist(empty, active);
+  const session = history.page().sessions[0];
+  assert.equal(session?.state, "idle");
+  assert.equal(session?.activeSince, undefined);
+  history.close();
+});
+
+test("session cursors preserve rows with identical timestamps", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "clawtop-history-")), "history.sqlite");
+  const history = new HistoryStore(path);
+  const empty = createState("live", 1);
+  const sessions = Array.from({ length: 26 }, (_, index) => ({ key: `same-time-${index}`, sessionId: `id-${index}`, kind: "direct" as const, updatedAt: 100 }));
+  const snapshot = reduceDashboard(empty, { type: "snapshot", gateway, agents: [], sessions, at: 100 });
+  history.persist(empty, snapshot);
+  const first = history.page(undefined, 25);
+  const second = history.page(first.nextCursor, 25);
+  const ids = [...first.sessions, ...second.sessions].map((session) => session.historyId);
+  assert.equal(first.sessions.length, 25);
+  assert.equal(second.sessions.length, 1);
+  assert.equal(new Set(ids).size, 26);
+  history.close();
+});
+
+test("activity cursors preserve events with identical timestamps", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "clawtop-history-")), "history.sqlite");
+  const history = new HistoryStore(path);
+  const empty = createState("live", 1);
+  let state = reduceDashboard(empty, { type: "snapshot", gateway, agents: [], sessions: [{ key: "same-time", sessionId: "run", kind: "direct" }], at: 10 });
+  history.persist(empty, state);
+  for (let index = 0; index < 41; index += 1) {
+    const next = reduceDashboard(state, { type: "event", gateway, event: "session.message", payload: { sessionKey: "same-time", runId: `run-${index}`, status: "done" }, at: 100 });
+    history.persist(state, next);
+    state = next;
+  }
+  const historyId = history.restore(state.sessions["one::same-time"]!).historyId!;
+  const first = history.activityPage(historyId, 40);
+  const second = history.activityPage(historyId, 40, first.nextCursor);
+  const ids = [...first.events, ...second.events].map((event) => event.id);
+  assert.equal(first.events.length, 40);
+  assert.equal(second.events.length, 1);
+  assert.equal(new Set(ids).size, 41);
   history.close();
 });

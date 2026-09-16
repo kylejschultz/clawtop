@@ -6,7 +6,7 @@ import type { AgentSummary, ProgressCard } from "@openclaw/gateway-protocol";
 import type { EventFrame, HelloOk } from "@openclaw/gateway-protocol/frame-guards";
 import type { AppSettings, Config, GatewayConfig } from "./config.js";
 import { createIdentityHost } from "./identity.js";
-import type { DashboardAction, GatewayRef, SessionWire } from "./model.js";
+import { activityFromRow, isTerminalStatus, type DashboardAction, type GatewayRef, type SessionWire } from "./model.js";
 
 type Dispatch = (action: DashboardAction) => void;
 export type ActivityAdapter = { start(): void; stop(): Promise<void>; update?(gateways: GatewayConfig[]): Promise<void>; refresh?(): void };
@@ -374,7 +374,7 @@ function activeSessionsFromRecent(recent: SessionsResult): SessionsResult {
 }
 
 export function mergeSessionViews(recent: SessionsResult, active: SessionsResult, settings: AppSettings = { inactiveSessionLimit: 200, inactiveAgeDays: 90 }, now = Date.now()): SessionViewResult {
-  const activeById = new Map(active.sessions.map((session) => [subscriptionId(session), session]));
+  const activeById = new Map(active.sessions.filter((session) => !isTerminalStatus(session.status?.trim().toLowerCase())).map((session) => [subscriptionId(session), session]));
   const cutoff = settings.inactiveAgeDays === "all" ? 0 : now - settings.inactiveAgeDays * 86400000;
   const inactive = recent.sessions
     .filter((session) => !activeById.has(subscriptionId(session)))
@@ -425,7 +425,7 @@ function wantsProgressCard(session: SessionWire): boolean {
   return isActiveSession(session) && !session.parentSessionKey && !session.spawnedBy;
 }
 function isActiveSession(session: SessionWire): boolean {
-  return session.hasActiveRun === true || session.hasActiveSubagentRun === true || (session.activeRunIds?.length ?? 0) > 0 || session.status === "running" || session.status === "queued";
+  return activityFromRow(session) === "active";
 }
 function rejectsActiveOnly(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);

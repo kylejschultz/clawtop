@@ -1,16 +1,18 @@
 # Clawtop
 
-A small, self-hosted, **read-only** terminal-style dashboard for live OpenClaw fleet activity. One Node service connects independently to one or more Gateways, merges their safe projections into a Gateway → agent → session tree, and streams it to the browser over SSE.
+A small, self-hosted, **read-only** observability workspace for live OpenClaw fleet activity. It keeps a little terminal DNA while presenting a clearer virtual office: one Node service connects independently to one or more Gateways, merges their safe projections into a Gateway → agent → session tree, and streams it to the browser over SSE.
 
 ![Status](https://img.shields.io/badge/status-MVP-74e0a8) ![Node](https://img.shields.io/badge/node-%3E%3D22.19-6bd5df)
 
 ## What the MVP shows
 
-- Gateway → agent → session → child-session hierarchy
+- Gateway → agent → session → child-session hierarchy with independent parent disclosures
 - Per-Gateway connect/reconnect/error state and server version
 - Active, idle, and unknown states without guessing unknown into idle
 - Verified runtime and placement facts when projected by the Gateway: agent runtime/harness, model provider, placement state/provider/profile, machine class/OS label, and paired-device runner availability
 - Active elapsed time, last-signal age, stable normalized work notes, sanitized progress-card summaries, and safe recent signals
+- Separate live and lazily paged durable-history views, with automatic workstream pagination
+- A deliberately flat History list because sanitized generations cannot safely reconstruct live parent/child links
 - Explicit session names with visibility-scoped, first-message-derived titles as a fallback when the Gateway supports them
 - Demo data for two Gateways with no OpenClaw configuration
 
