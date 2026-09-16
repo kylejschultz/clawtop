@@ -43,6 +43,7 @@ export type DashboardProgress = {
 };
 export type DashboardSession = {
   key: string;
+  historyId?: string;
   sourceKey: string;
   gatewayId: string;
   sessionId?: string;

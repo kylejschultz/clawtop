@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createActiveSessionFetcher, createDerivedTitleRequest, ExactSessionSubscriptions, fetchActiveSessions, gatewayChanges, mergeSessionViews, subscribeSessions } from "./adapters.js";
+import { createActiveSessionFetcher, createDerivedTitleRequest, ExactSessionSubscriptions, fetchActiveSessions, gatewayChanges, mergeSessionViews, recentSessionLimit, subscribeSessions } from "./adapters.js";
 import type { SessionWire } from "./model.js";
 
 const row = (key: string, agentId = "main"): SessionWire => ({ key, kind: "direct", agentId });
@@ -89,6 +89,11 @@ test("paginates activeOnly reads until every active session is present", async (
     { activeOnly: true, limit: 200, offset: 0 },
     { activeOnly: true, limit: 200, offset: 200 }
   ]);
+});
+
+test("bounds recent requests by the inactive setting while preserving the protocol minimum", () => {
+  assert.equal(recentSessionLimit({ inactiveSessionLimit: 37, inactiveAgeDays: 90 }), 37);
+  assert.equal(recentSessionLimit({ inactiveSessionLimit: 0, inactiveAgeDays: 90 }), 1);
 });
 
 test("fetches a recent page when legacy sessions.subscribe omits its list", async () => {

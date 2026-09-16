@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { createAdapter } from "./adapters.js";
 import { applyGatewayUpdate, atomicWriteJson, loadConfig, maskGateways, parseGateways, parseSettings, type AppSettings, type GatewayConfig } from "./config.js";
 import { HistoryStore } from "./history.js";
-import { validBasicAuthorization } from "./http-auth.js";
+import { sameOriginRequest, validBasicAuthorization } from "./http-auth.js";
 import { SseBroadcaster } from "./sse.js";
 import { DashboardStore } from "./store.js";
 
@@ -44,8 +44,12 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
       const nextSettings = parseSettings(body.settings);
       const nextGateways = body.gateways === undefined ? gateways : applyGatewayUpdate(gateways, body.gateways);
       await serialize(async () => {
-        atomicWriteJson(config.settingsFile, nextSettings);
         if (body.gateways !== undefined) atomicWriteJson(config.gatewaysFile, nextGateways);
+        try { atomicWriteJson(config.settingsFile, nextSettings); }
+        catch (error) {
+          if (body.gateways !== undefined) atomicWriteJson(config.gatewaysFile, gateways);
+          throw error;
+        }
         settings = nextSettings;
         gateways = nextGateways;
         configError = undefined;
@@ -61,8 +65,8 @@ async function route(request: IncomingMessage, response: ServerResponse): Promis
     return json(response, 200, history.page(before, Math.min(limit, 100)));
   }
   if (request.method === "GET" && path === "/api/history/events") {
-    const key = url.searchParams.get("sessionKey");
-    if (!key || key.length > 500) return json(response, 400, { error: "valid sessionKey required" });
+    const key = url.searchParams.get("historyId");
+    if (!key || key.length > 500) return json(response, 400, { error: "valid historyId required" });
     const before = positive(url.searchParams.get("before"), Number.MAX_SAFE_INTEGER);
     const limit = Math.min(positive(url.searchParams.get("limit"), 40), 100);
     const items = history.activities(key, limit + 1, before);
@@ -99,17 +103,18 @@ function reloadGateways(): void {
 }
 let watchTimer: NodeJS.Timeout | undefined;
 const watcher = config.mode === "live" ? watch(dirname(config.gatewaysFile), (_event, filename) => {
-  if (filename !== "gateways.json") return;
+  if (String(filename) !== "gateways.json") return;
   if (watchTimer) clearTimeout(watchTimer);
   watchTimer = setTimeout(reloadGateways, 100);
 }) : undefined;
+watcher?.on("error", (error) => { configError = `gateways.json watch failed: ${safeError(error)}`.slice(0, 300); });
 
 function authorized(request: IncomingMessage): boolean { return !config.httpAuth || validBasicAuthorization(request.headers.authorization, config.httpAuth); }
 function unauthorized(response: ServerResponse): void { response.setHeader("www-authenticate", 'Basic realm="Clawtop", charset="UTF-8"'); reply(response, 401, "authentication required", "text/plain; charset=utf-8"); }
 function sameOrigin(request: IncomingMessage): boolean {
-  const origin = request.headers.origin;
-  if (!origin || !request.headers.host) return false;
-  try { return new URL(origin).host === request.headers.host && ["http:", "https:"].includes(new URL(origin).protocol); } catch { return false; }
+  const protocol = (request.socket as typeof request.socket & { encrypted?: boolean }).encrypted ? "https:" : "http:";
+  const site = request.headers["sec-fetch-site"];
+  return sameOriginRequest({ origin: request.headers.origin, host: request.headers.host, secFetchSite: Array.isArray(site) ? site[0] : site }, protocol);
 }
 async function readJson(request: IncomingMessage): Promise<unknown> {
   let body = "";

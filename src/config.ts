@@ -89,16 +89,23 @@ export function atomicWriteJson(path: string, value: unknown): void {
 }
 
 export function maskGateways(gateways: GatewayConfig[]): unknown[] {
-  return gateways.map(({ token, password, bootstrapToken, ...gateway }) => ({ ...gateway, auth: token ? { method: "token", configured: true } : password ? { method: "password", configured: true } : bootstrapToken ? { method: "bootstrapToken", configured: true } : { method: "none", configured: false } }));
+  return gateways.map(({ token, password, bootstrapToken, ...gateway }) => ({ ...gateway, originalId: gateway.id, auth: token ? { method: "token", configured: true } : password ? { method: "password", configured: true } : bootstrapToken ? { method: "bootstrapToken", configured: true } : { method: "none", configured: false } }));
 }
 
 export function applyGatewayUpdate(current: GatewayConfig[], input: unknown): GatewayConfig[] {
   if (!Array.isArray(input)) fail("gateways must be an array");
   const byId = new Map(current.map((gateway) => [gateway.id, gateway]));
+  const usedOriginalIds = new Set<string>();
   const candidate = input.map((raw, index) => {
     const item = record(raw) ?? fail(`Gateway ${index + 1} must be an object`);
     const id = optionalString(item.id) ?? "";
-    const previous = byId.get(id);
+    if (item.originalId !== undefined && typeof item.originalId !== "string") fail(`Gateway ${index + 1} originalId must be a string`);
+    const suppliedOriginalId = optionalString(item.originalId);
+    if (suppliedOriginalId && !byId.has(suppliedOriginalId)) fail(`Gateway ${index + 1} originalId does not exist`);
+    const originalId = suppliedOriginalId ?? (byId.has(id) ? id : undefined);
+    if (originalId && usedOriginalIds.has(originalId)) fail(`Gateway ${index + 1} reuses originalId ${originalId}`);
+    if (originalId) usedOriginalIds.add(originalId);
+    const previous = originalId ? byId.get(originalId) : undefined;
     const auth = record(item.auth) ?? {};
     const method = auth.method;
     const action = auth.action ?? "preserve";

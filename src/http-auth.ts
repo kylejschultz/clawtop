@@ -2,6 +2,12 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 export type HttpAuth = { username: string; password: string };
 
+export function sameOriginRequest(headers: { origin?: string; host?: string; secFetchSite?: string }, protocol: "http:" | "https:"): boolean {
+  if (headers.secFetchSite !== undefined && headers.secFetchSite !== "same-origin") return false;
+  if (!headers.origin || !headers.host) return false;
+  try { return new URL(headers.origin).origin === new URL(`${protocol}//${headers.host}`).origin; } catch { return false; }
+}
+
 export function validBasicAuthorization(header: string | undefined, auth: HttpAuth): boolean {
   const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(header ?? "");
   let username = "";

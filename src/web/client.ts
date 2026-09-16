@@ -7,7 +7,7 @@ type Gateway = { id: string; name: string; host?: string; totalSessions?: number
 type Runtime = { id: string; source: string; fallback?: string; cloudPlacementSupported?: boolean; cloudPlacementExecutionMode?: string; devicePlacementSupported?: boolean; devicePlacement?: { consumesWorkerSlot: boolean } };
 type Placement = { state: string; providerId?: string; profileId?: string; machine?: { class?: string; os?: string; osLabel?: string }; runner?: { kind: "device"; status: "available" | "offline"; deviceId?: string } };
 type Progress = { revision: number; updatedAt: number; completed: number; total: number; step?: string; stepStatus?: "in_progress" | "pending" };
-type Session = { key: string; sourceKey: string; gatewayId: string; sessionId?: string; agentId: string; title: string; kind: string; channel?: string; parentSessionKey?: string; childSessions: string[]; state: ActivityState; lifecycleSince: number; activeSince?: number; updatedAt?: number; lastSignalAt?: number; model?: string; modelProvider?: string; agentRuntime?: Runtime; placement?: Placement; status?: string; progress?: Progress; activity: Activity[] };
+type Session = { key: string; historyId?: string; sourceKey: string; gatewayId: string; sessionId?: string; agentId: string; title: string; kind: string; channel?: string; parentSessionKey?: string; childSessions: string[]; state: ActivityState; lifecycleSince: number; activeSince?: number; updatedAt?: number; lastSignalAt?: number; model?: string; modelProvider?: string; agentRuntime?: Runtime; placement?: Placement; status?: string; progress?: Progress; activity: Activity[] };
 type Agent = { id: string; sourceId: string; gatewayId: string; name: string; emoji?: string; model?: string; agentRuntime?: Runtime };
 type State = { mode: "demo" | "live"; gateways: Record<string, Gateway>; agents: Record<string, Agent>; sessions: Record<string, Session>; updatedAt: number };
 
@@ -412,7 +412,7 @@ function get(id: string): HTMLElement { const node = document.getElementById(id)
 function element(tag: string, className = ""): HTMLElement { const node = document.createElement(tag); if (className) node.className = className; return node; }
 function text(value: string, className = "", tag = "span"): HTMLElement { const node = element(tag, className); node.textContent = value; return node; }
 
-type BrowserGatewaySetting = { id: string; name: string; host?: string; url: string; tlsFingerprint?: string; auth: { method: "none" | "token" | "password" | "bootstrapToken"; configured: boolean } };
+type BrowserGatewaySetting = { id: string; originalId: string; name: string; host?: string; url: string; tlsFingerprint?: string; auth: { method: "none" | "token" | "password" | "bootstrapToken"; configured: boolean } };
 type BrowserSettings = { settings: { inactiveSessionLimit: number; inactiveAgeDays: number | "all" }; gateways: BrowserGatewaySetting[]; configError?: string };
 const historicalSessions = new Map<string, Session>();
 const loadedEvents = new Map<string, Activity[]>();
@@ -445,6 +445,7 @@ function appendGatewayForm(gateway?: BrowserGatewaySetting): void {
   const secret = form.elements.namedItem("secret") as HTMLInputElement;
   secret.placeholder = gateway?.auth.configured ? "Configured; leave blank to preserve" : "Write-only replacement";
   form.dataset.authMethod = gateway?.auth.method ?? "none";
+  form.dataset.originalId = gateway?.originalId ?? "";
   form.querySelector(".gateway-remove")?.addEventListener("click", () => form.remove());
   get("gateway-forms").append(form);
 }
@@ -456,7 +457,7 @@ async function saveSettings(): Promise<void> {
     const secret = field("secret");
     const clear = (form.elements.namedItem("clearSecret") as HTMLInputElement).checked;
     const action = clear ? "clear" : secret ? "replace" : "preserve";
-    return { id: field("id"), name: field("name"), host: field("host"), url: field("url"), tlsFingerprint: field("tlsFingerprint"), auth: { method: clear ? "none" : method, action, value: secret || undefined } };
+    return { id: field("id"), originalId: form.dataset.originalId || undefined, name: field("name"), host: field("host"), url: field("url"), tlsFingerprint: field("tlsFingerprint"), auth: { method: clear ? "none" : method, action, value: secret || undefined } };
   });
   const inactiveAge = (get("inactive-age") as HTMLSelectElement).value;
   const body = { settings: { inactiveSessionLimit: Number((get("inactive-limit") as HTMLInputElement).value), inactiveAgeDays: inactiveAge === "all" ? "all" : Number(inactiveAge) }, gateways };
@@ -483,7 +484,7 @@ async function loadOlderEvents(): Promise<void> {
   if (!session) return;
   const existing = [...session.activity, ...(loadedEvents.get(session.key) ?? [])];
   const before = existing.length ? Math.min(...existing.map((item) => item.at)) : Number.MAX_SAFE_INTEGER;
-  const query = new URLSearchParams({ sessionKey: session.key, before: String(before), limit: "40" });
+  const query = new URLSearchParams({ historyId: session.historyId ?? session.key, before: String(before), limit: "40" });
   const response = await fetch(`/api/history/events?${query}`);
   if (!response.ok) return;
   const page = await response.json() as { events: Activity[]; nextBefore?: number };

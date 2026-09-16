@@ -66,6 +66,7 @@ class LiveFleetAdapter implements ActivityAdapter {
   refresh(): void { for (const item of this.adapters.values()) item.adapter.refreshNow(); }
   async update(gateways: GatewayConfig[]): Promise<void> {
     const changes = gatewayChanges([...this.adapters.entries()].map(([id, item]) => ({ id, signature: item.signature })), gateways);
+    const additions = changes.add.map((gateway) => ({ gateway, adapter: new LiveAdapter(gateway, this.dataDir, this.dispatch, this.settings) }));
     for (const id of changes.remove) {
       const item = this.adapters.get(id);
       if (!item) continue;
@@ -73,7 +74,10 @@ class LiveFleetAdapter implements ActivityAdapter {
       this.adapters.delete(id);
       this.dispatch({ type: "removeGateway", gatewayId: id, at: Date.now() });
     }
-    for (const gateway of changes.add) { const adapter = this.add(gateway); if (this.started) adapter.start(); }
+    for (const { gateway, adapter } of additions) {
+      this.adapters.set(gateway.id, { signature: JSON.stringify(gateway), adapter });
+      if (this.started) adapter.start();
+    }
   }
   private add(gateway: GatewayConfig): LiveAdapter {
     const adapter = new LiveAdapter(gateway, this.dataDir, this.dispatch, this.settings);
@@ -172,7 +176,7 @@ class LiveAdapter implements ActivityAdapter {
     try {
       const [agents, recent, active] = await Promise.all([
         this.client.request<AgentsResult>("agents.list", {}),
-        subscribeSessions(this.sessionRequest),
+        subscribeSessions(this.sessionRequest, recentSessionLimit(this.settings())),
         this.readActiveSessions()
       ]);
       const nextAgents = validAgents(agents);
@@ -221,7 +225,7 @@ class LiveAdapter implements ActivityAdapter {
     const revision = ++this.snapshotRevision;
     try {
       const [recent, active] = await Promise.all([
-        this.sessionRequest("sessions.list", { limit: SESSION_PAGE_SIZE }).then(validSessions),
+        this.sessionRequest("sessions.list", { limit: recentSessionLimit(this.settings()) }).then(validSessions),
         this.readActiveSessions()
       ]);
       if (revision !== this.snapshotRevision) return;
@@ -312,11 +316,14 @@ class DemoAdapter implements ActivityAdapter {
   }
 }
 
-export async function subscribeSessions(request: Request): Promise<SessionsResult> {
-  const value = record(await request("sessions.subscribe", { limit: SESSION_PAGE_SIZE }));
+export async function subscribeSessions(request: Request, limit = SESSION_PAGE_SIZE): Promise<SessionsResult> {
+  const bounded = Math.max(1, Math.min(SESSION_PAGE_SIZE, Math.trunc(limit)));
+  const value = record(await request("sessions.subscribe", { limit: bounded }));
   if (value?.subscribed !== true) throw new Error("sessions.subscribe returned an invalid payload");
-  return validSessions(await request("sessions.list", { limit: SESSION_PAGE_SIZE }));
+  return validSessions(await request("sessions.list", { limit: bounded }));
 }
+
+export function recentSessionLimit(settings: AppSettings): number { return Math.max(1, settings.inactiveSessionLimit); }
 
 export function createDerivedTitleRequest(request: Request): Request {
   let supported = true;
