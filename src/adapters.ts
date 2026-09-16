@@ -273,7 +273,6 @@ class DemoAdapter implements ActivityAdapter {
 export async function subscribeSessions(request: Request): Promise<SessionsResult> {
   const value = record(await request("sessions.subscribe", { limit: SESSION_PAGE_SIZE }));
   if (value?.subscribed !== true) throw new Error("sessions.subscribe returned an invalid payload");
-  if (value.list !== undefined) return validSessions(value.list);
   return validSessions(await request("sessions.list", { limit: SESSION_PAGE_SIZE }));
 }
 

@@ -88,14 +88,19 @@ test("fetches a recent page when legacy sessions.subscribe omits its list", asyn
   ]);
 });
 
-test("keeps the modern sessions.subscribe list without an extra read", async () => {
-  let calls = 0;
-  const result = await subscribeSessions(async () => {
-    calls += 1;
-    return { subscribed: true, list: { sessions: [row("modern")] } };
+test("refreshes the modern subscription snapshot so derived titles are included", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const result = await subscribeSessions(async (method, params) => {
+    calls.push({ method, params });
+    return method === "sessions.subscribe"
+      ? { subscribed: true, list: { sessions: [row("subscription-snapshot")] } }
+      : { sessions: [row("enriched-list")] };
   });
-  assert.deepEqual(result.sessions, [row("modern")]);
-  assert.equal(calls, 1);
+  assert.deepEqual(result.sessions, [row("enriched-list")]);
+  assert.deepEqual(calls, [
+    { method: "sessions.subscribe", params: { limit: 200 } },
+    { method: "sessions.list", params: { limit: 200 } }
+  ]);
 });
 
 test("requests derived titles and caches the compatibility fallback", async () => {
