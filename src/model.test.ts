@@ -139,6 +139,36 @@ test("active run semantics distinguish idle, active, and unknown", () => {
   assert.equal(state.sessions["alpha::agent:main:unknown"]?.state, "unknown");
 });
 
+test("terminal runtime status overrides stale active flags and run ids", () => {
+  const terminal = ["done", "completed", "complete", "finished", "succeeded", "success", "failed", "error", "cancelled", "canceled", "aborted", "killed", "terminated", "timeout", "timed_out", "stopped", "idle", "skipped"];
+  const state = reduceDashboard(createState("live", 0), {
+    ...snapshot(alpha, terminal.map((status) => root({ key: status, status, hasActiveRun: true, hasActiveSubagentRun: true, activeRunIds: ["stale"] })), 10),
+    activeSessions: terminal.length
+  });
+  assert.deepEqual(Object.values(state.sessions).map((session) => session.state), terminal.map(() => "idle"));
+  assert.equal(state.gateways.alpha?.activeSessions, 0);
+});
+
+test("Gateway active total is derived from the same normalized sessions", () => {
+  const state = reduceDashboard(createState("live", 0), {
+    ...snapshot(alpha, [
+      root({ key: "live", status: "running", hasActiveRun: false }),
+      root({ key: "stale", status: "done", hasActiveRun: true, activeRunIds: ["stale"] }),
+      root({ key: "child", hasActiveSubagentRun: true })
+    ], 10),
+    activeSessions: 99
+  });
+  assert.equal(Object.values(state.sessions).filter((session) => session.state === "active").length, 2);
+  assert.equal(state.gateways.alpha?.activeSessions, 2);
+});
+
+test("terminal sessions.changed status overrides a stale active event flag", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [root({ hasActiveRun: true })], 10));
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 20, payload: { sessionKey: root().key, status: "completed", hasActiveRun: true, activeRunIds: ["stale"] } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "idle");
+  assert.equal(state.gateways.alpha?.activeSessions, 0);
+});
+
 test("events and connection failures remain isolated to their Gateway", () => {
   let state = reduceDashboard(createState("demo", 0), snapshot(alpha, [root()], 10));
   state = reduceDashboard(state, snapshot(beta, [root()], 11));

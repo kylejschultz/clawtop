@@ -19,6 +19,8 @@ let noteRefreshTimer: number | undefined;
 let noteRefreshAt = 0;
 const stableWorkNotes = new Map<string, StableWorkNote>();
 const expandedGateways = new Set<string>();
+const collapsedParents = new Set<string>();
+let viewMode: "live" | "history" = "live";
 const tree = get("tree");
 const detailContent = get("detail-content") as HTMLElement;
 const empty = get("empty") as HTMLElement;
@@ -26,12 +28,8 @@ const source = new EventSource("/api/events");
 
 source.addEventListener("state", (event) => {
   state = JSON.parse((event as MessageEvent<string>).data) as State;
-  if (historyBefore === undefined) {
-    const times = Object.values(state.sessions).map((session) => session.lastSignalAt ?? session.updatedAt).filter((at): at is number => typeof at === "number");
-    historyBefore = times.length ? Math.min(...times) : undefined;
-  }
   browserConnected = true;
-  if (!selected || !state.sessions[selected]) selected = initialSelection(state);
+  if (!selected || (viewMode === "live" ? !state.sessions[selected] : !historicalSessions.has(selected))) selected = viewMode === "live" ? initialSelection(state) : sortSessions([...historicalSessions.values()])[0]?.key ?? "";
   render();
 });
 source.onopen = () => { browserConnected = true; renderConnection(); };
@@ -41,29 +39,36 @@ setInterval(() => { renderTimes(); }, 1000);
 function render(): void {
   if (!state) return;
   get("mode").textContent = `mode: ${state.mode}`;
+  (get("view-live") as HTMLButtonElement).setAttribute("aria-pressed", String(viewMode === "live"));
+  (get("view-history") as HTMLButtonElement).setAttribute("aria-pressed", String(viewMode === "history"));
   const gateways = Object.values(state.gateways);
   const agents = Object.values(state.agents);
-  const sessions = [...Object.values(state.sessions), ...[...historicalSessions.values()].filter((session) => !state?.sessions[session.key])];
+  const liveAgentCount = agents.length;
+  const liveSessions = Object.values(state.sessions);
+  const sessions = viewMode === "live" ? liveSessions : [...historicalSessions.values()];
   for (const session of sessions) if (!agents.some((agent) => agent.id === session.agentId)) agents.push({ id: session.agentId, sourceId: session.agentId.split("::").at(-1) ?? session.agentId, gatewayId: session.gatewayId, name: session.agentId.split("::").at(-1) ?? "historical" });
-  const active = sessions.filter((session) => session.state === "active").length;
+  const active = liveSessions.filter((session) => session.state === "active").length;
   const connected = gateways.filter((gateway) => gateway.connection.state === "connected").length;
   const hidden = gateways.reduce((sum, gateway) => sum + (gateway.omittedInactiveSessions ?? 0), 0);
   renderedWorkNotes = new Map();
   const sessionKeys = new Set(sessions.map(noteCacheKey));
   for (const key of stableWorkNotes.keys()) if (!sessionKeys.has(key)) stableWorkNotes.delete(key);
   get("metric-gateways").textContent = `${connected}/${gateways.length}`;
-  get("metric-agents").textContent = String(agents.length);
-  get("metric-sessions").textContent = String(sessions.length);
+  get("metric-agents").textContent = String(liveAgentCount);
+  get("metric-sessions").textContent = String(liveSessions.length);
   get("metric-active").textContent = String(active);
   get("metric-updated").textContent = relative(state.updatedAt);
-  get("counts").textContent = `${sessions.length} shown${hidden ? ` · ${hidden} older inactive hidden` : ""}`;
+  get("counts").textContent = viewMode === "live" ? `${sessions.length} shown${hidden ? ` · ${hidden} inactive hidden` : ""}` : `${sessions.length} archived`;
   renderConnection();
-  tree.replaceChildren(...gateways.sort((a, b) => a.name.localeCompare(b.name)).map((gateway) => renderGateway(
+  const visibleGateways = [...gateways];
+  for (const session of sessions) if (!visibleGateways.some((gateway) => gateway.id === session.gatewayId)) visibleGateways.push({ id: session.gatewayId, name: session.gatewayId, connection: { state: "offline", since: 0 } });
+  tree.replaceChildren(...visibleGateways.sort((a, b) => a.name.localeCompare(b.name)).map((gateway) => renderGateway(
     gateway,
     agents.filter((agent) => agent.gatewayId === gateway.id),
     sessions.filter((session) => session.gatewayId === gateway.id)
   )));
   renderDetail();
+  queueMicrotask(() => { if (viewMode === "history" && nearEnd(tree)) void loadOlderSessions(); });
 }
 
 function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): HTMLElement {
@@ -80,7 +85,7 @@ function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): 
     render();
   });
 
-  const active = gateway.activeSessions ?? sessions.filter((session) => session.state === "active").length;
+  const active = sessions.filter((session) => session.state === "active").length;
   const activeFocus = sortSessions(sessions.filter((session) => session.state === "active"))[0];
   const focus = activeFocus ?? sortSessions(sessions).find((session) => Boolean(workNoteCandidate(session)));
   const note = focus ? workNote(focus) : undefined;
@@ -139,10 +144,26 @@ function renderAgent(agent: Agent, sessions: Session[]): HTMLElement {
 function appendSession(parent: HTMLElement, session: Session, byKey: Map<string, Session>, seen: Set<string>, depth: number): void {
   if (seen.has(session.key)) return;
   seen.add(session.key);
+  const children = new Set(session.childSessions);
+  for (const item of byKey.values()) if (item.parentSessionKey === session.key) children.add(item.key);
+  children.delete(session.key);
+  const childItems = sortSessions([...children].map((key) => byKey.get(key)).filter((item): item is Session => Boolean(item && !seen.has(item.key))));
+  const wrapper = element("div", "session-row");
+  wrapper.style.setProperty("--depth", String(Math.min(depth, 6)));
+  if (childItems.length) {
+    const disclosure = document.createElement("button");
+    const expanded = !collapsedParents.has(session.key);
+    disclosure.type = "button";
+    disclosure.className = `session-disclosure${expanded ? " open" : ""}`;
+    disclosure.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} child sessions for ${session.title}`);
+    disclosure.setAttribute("aria-expanded", String(expanded));
+    disclosure.setAttribute("aria-controls", `children-${domId(session.key)}`);
+    disclosure.addEventListener("click", () => { if (expanded) collapsedParents.add(session.key); else collapsedParents.delete(session.key); render(); });
+    wrapper.append(disclosure);
+  } else wrapper.append(text("", "session-disclosure-spacer"));
   const button = document.createElement("button");
   button.type = "button";
   button.className = `session${selected === session.key ? " selected" : ""}`;
-  button.style.setProperty("--depth", String(Math.min(depth, 6)));
   button.setAttribute("aria-pressed", String(selected === session.key));
   button.dataset.key = session.key;
   button.addEventListener("click", () => { selected = session.key; render(); });
@@ -151,10 +172,13 @@ function appendSession(parent: HTMLElement, session: Session, byKey: Map<string,
   const note = workNote(session);
   label.append(text(session.title), text(note?.text ?? `${session.kind}${session.channel ? ` · ${session.channel}` : ""}`, "session-meta"));
   button.append(label, text(relative(session.lastSignalAt ?? session.updatedAt), "session-age"));
-  parent.append(button);
-  const children = new Set(session.childSessions);
-  for (const item of byKey.values()) if (item.parentSessionKey === session.key) children.add(item.key);
-  for (const child of sortSessions([...children].map((key) => byKey.get(key)).filter((item): item is Session => Boolean(item)))) appendSession(parent, child, byKey, seen, depth + 1);
+  wrapper.append(button);
+  parent.append(wrapper);
+  const childGroup = element("div", "session-children");
+  childGroup.id = `children-${domId(session.key)}`;
+  childGroup.hidden = collapsedParents.has(session.key);
+  for (const child of childItems) appendSession(childGroup, child, byKey, seen, depth + 1);
+  if (childItems.length) parent.append(childGroup);
 }
 
 function renderConnection(): void {
@@ -173,7 +197,7 @@ function renderConnection(): void {
 }
 
 function renderDetail(): void {
-  const session = state?.sessions[selected] ?? historicalSessions.get(selected);
+  const session = viewMode === "live" ? state?.sessions[selected] : historicalSessions.get(selected);
   empty.hidden = Boolean(session);
   detailContent.hidden = !session;
   if (!session) return;
@@ -213,6 +237,7 @@ function renderDetail(): void {
   }
   const loaded = loadedEvents.get(session.key) ?? [];
   const activity = [...new Map([...session.activity, ...loaded].map((item) => [item.id, item])).values()].sort((a, b) => b.at - a.at);
+  showPageState("event-page-state", eventEnded.has(session.key) ? "Start of recorded activity" : undefined);
   renderActivity(activity);
   renderTimes();
 }
@@ -222,12 +247,20 @@ function renderActivity(items: Activity[]): void {
   get("activity-summary").textContent = items.length ? `${items.length} signals · ${tools} tool action${tools === 1 ? "" : "s"}` : "waiting for activity";
   const events = get("events");
   events.replaceChildren(...(items.length ? activityRows(items).map(renderEvent) : [text("No sanitized live activity received in this process.", "empty-row", "li")]));
+  queueMicrotask(() => { if (nearEnd(events)) void loadOlderEvents(); });
 }
 
 function activityRows(items: Activity[]): ActivityView[] {
   const rows: ActivityView[] = [];
   const repeated = new Map<string, ActivityView>();
-  for (const item of items) {
+  const lifecycle = new Set(["start", "finishing", "end"]);
+  for (let index = 0; index < items.length; index += 1) {
+    let item = items[index]!;
+    if (item.kind === "agent" && lifecycle.has(item.label)) {
+      const phases = [item];
+      while (items[index + 1]?.kind === "agent" && lifecycle.has(items[index + 1]!.label) && items[index + 1]!.runId === item.runId) phases.push(items[++index]!);
+      item = phases.find((phase) => phase.label === "end") ?? phases.find((phase) => phase.label === "finishing") ?? item;
+    }
     const canGroup = !item.detail && (item.kind === "agent" || item.kind === "session");
     const key = canGroup ? `${item.runId ?? ""}:${item.kind}:${item.label}:${item.status ?? ""}` : "";
     const current = key ? repeated.get(key) : undefined;
@@ -275,7 +308,7 @@ function activityLabel(item: Activity): string {
     thinking: "Model working",
     finishing: "Finishing response",
     final_answer: "Composing final answer",
-    end: "Response finished",
+    end: "Response completed",
     usage: "Usage updated"
   };
   return labels[item.label] ?? item.label.replaceAll("_", " ");
@@ -357,10 +390,10 @@ function scheduleNoteRefresh(at: number): void {
 }
 
 function renderTimes(): void {
-  const session = state?.sessions[selected] ?? historicalSessions.get(selected);
+  const session = viewMode === "live" ? state?.sessions[selected] : historicalSessions.get(selected);
   if (session) get("elapsed").textContent = session.state === "active" && session.activeSince ? `elapsed ${duration(Date.now() - session.activeSince)}` : `last ${relative(session.lastSignalAt ?? session.updatedAt)}`;
   document.querySelectorAll<HTMLElement>(".session[data-key]").forEach((node) => {
-    const item = state?.sessions[node.dataset.key ?? ""];
+    const item = state?.sessions[node.dataset.key ?? ""] ?? historicalSessions.get(node.dataset.key ?? "");
     const age = node.querySelector<HTMLElement>(".session-age");
     if (age && item) age.textContent = relative(item.lastSignalAt ?? item.updatedAt);
   });
@@ -408,6 +441,7 @@ function machine(value: Placement["machine"]): string | undefined {
   return [value.class, value.osLabel ?? value.os].filter(Boolean).join(" · ") || undefined;
 }
 function addFact(parent: HTMLElement, label: string, value: string | undefined): void { if (value) parent.append(text(label, "", "dt"), text(value, "", "dd")); }
+function domId(value: string): string { return [...value].map((character) => /[a-z0-9_-]/iu.test(character) ? character : `-${character.codePointAt(0)?.toString(16)}`).join(""); }
 function get(id: string): HTMLElement { const node = document.getElementById(id); if (!node) throw new Error(`missing #${id}`); return node; }
 function element(tag: string, className = ""): HTMLElement { const node = document.createElement(tag); if (className) node.className = className; return node; }
 function text(value: string, className = "", tag = "span"): HTMLElement { const node = element(tag, className); node.textContent = value; return node; }
@@ -417,13 +451,19 @@ type BrowserSettings = { settings: { inactiveSessionLimit: number; inactiveAgeDa
 const historicalSessions = new Map<string, Session>();
 const loadedEvents = new Map<string, Activity[]>();
 let historyBefore: number | undefined;
+let historyLoading = false;
+let historyEnded = false;
+const eventLoading = new Set<string>();
+const eventEnded = new Set<string>();
 const settingsDialog = get("settings-dialog") as HTMLDialogElement;
 get("settings-open").addEventListener("click", () => { void openSettings(); });
 get("settings-close").addEventListener("click", () => settingsDialog.close());
 get("settings-cancel").addEventListener("click", () => settingsDialog.close());
 get("gateway-add").addEventListener("click", () => appendGatewayForm());
-get("load-history").addEventListener("click", () => { void loadOlderSessions(); });
-get("load-events").addEventListener("click", () => { void loadOlderEvents(); });
+get("view-live").addEventListener("click", () => setView("live"));
+get("view-history").addEventListener("click", () => setView("history"));
+tree.addEventListener("scroll", () => { if (viewMode === "history" && nearEnd(tree)) void loadOlderSessions(); });
+get("events").addEventListener("scroll", () => { if (nearEnd(get("events"))) void loadOlderEvents(); });
 get("settings-form").addEventListener("submit", (event) => { event.preventDefault(); void saveSettings(); });
 
 async function openSettings(): Promise<void> {
@@ -467,28 +507,51 @@ async function saveSettings(): Promise<void> {
   settingsDialog.close();
 }
 function showSettingsError(message?: string): void { const node = get("settings-error"); node.hidden = !message; node.textContent = message ?? ""; }
+function setView(next: "live" | "history"): void {
+  if (viewMode === next) return;
+  viewMode = next;
+  selected = next === "live" && state ? initialSelection(state) : sortSessions([...historicalSessions.values()])[0]?.key ?? "";
+  if (next === "history" && !historicalSessions.size && !historyEnded) void loadOlderSessions();
+  render();
+}
+function nearEnd(node: HTMLElement): boolean { return node.scrollHeight - node.scrollTop - node.clientHeight < 180; }
+function showPageState(id: string, message?: string): void { const node = get(id); node.hidden = !message; node.textContent = message ?? ""; }
 async function loadOlderSessions(): Promise<void> {
+  if (historyLoading || historyEnded) return;
+  historyLoading = true;
+  showPageState("history-state", "Loading history…");
   const query = new URLSearchParams({ limit: "25" });
   if (historyBefore) query.set("before", String(historyBefore));
-  const response = await fetch(`/api/history/sessions?${query}`);
-  if (!response.ok) return;
-  const page = await response.json() as { sessions: Session[]; nextBefore?: number };
-  for (const session of page.sessions) if (!state?.sessions[session.key]) historicalSessions.set(session.key, session);
-  historyBefore = page.nextBefore;
-  (get("load-history") as HTMLButtonElement).disabled = !historyBefore;
-  render();
+  try {
+    const response = await fetch(`/api/history/sessions?${query}`);
+    if (!response.ok) return showPageState("history-state", "History could not be loaded.");
+    const page = await response.json() as { sessions: Session[]; nextBefore?: number };
+    for (const session of page.sessions) historicalSessions.set(session.key, { ...session, state: "idle", activeSince: undefined });
+    historyBefore = page.nextBefore;
+    historyEnded = !page.nextBefore;
+    if (!selected && page.sessions[0]) selected = page.sessions[0].key;
+    showPageState("history-state", historyEnded ? "End of history" : undefined);
+    render();
+  } catch { showPageState("history-state", "History could not be loaded."); }
+  finally { historyLoading = false; }
 }
 
 async function loadOlderEvents(): Promise<void> {
-  const session = state?.sessions[selected] ?? historicalSessions.get(selected);
-  if (!session) return;
+  const session = viewMode === "live" ? state?.sessions[selected] : historicalSessions.get(selected);
+  if (!session || eventLoading.has(session.key) || eventEnded.has(session.key)) return;
+  eventLoading.add(session.key);
+  showPageState("event-page-state", "Loading earlier activity…");
   const existing = [...session.activity, ...(loadedEvents.get(session.key) ?? [])];
   const before = existing.length ? Math.min(...existing.map((item) => item.at)) : Number.MAX_SAFE_INTEGER;
   const query = new URLSearchParams({ historyId: session.historyId ?? session.key, before: String(before), limit: "40" });
-  const response = await fetch(`/api/history/events?${query}`);
-  if (!response.ok) return;
-  const page = await response.json() as { events: Activity[]; nextBefore?: number };
-  loadedEvents.set(session.key, [...(loadedEvents.get(session.key) ?? []), ...page.events]);
-  (get("load-events") as HTMLButtonElement).disabled = !page.nextBefore;
-  renderDetail();
+  try {
+    const response = await fetch(`/api/history/events?${query}`);
+    if (!response.ok) return showPageState("event-page-state", "Earlier activity could not be loaded.");
+    const page = await response.json() as { events: Activity[]; nextBefore?: number };
+    loadedEvents.set(session.key, [...(loadedEvents.get(session.key) ?? []), ...page.events]);
+    if (!page.nextBefore) eventEnded.add(session.key);
+    showPageState("event-page-state", page.nextBefore ? undefined : "Start of recorded activity");
+    renderDetail();
+  } catch { showPageState("event-page-state", "Earlier activity could not be loaded."); }
+  finally { eventLoading.delete(session.key); }
 }

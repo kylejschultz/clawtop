@@ -64,6 +64,13 @@ test("active sessions bypass inactive age and count filters", () => {
   assert.equal(view.omittedInactiveSessions, 1);
 });
 
+test("terminal rows returned by activeOnly are excluded from active counts", () => {
+  const stale = { ...row("stale"), status: "completed" as const, hasActiveRun: true, activeRunIds: ["old"] };
+  const view = mergeSessionViews({ sessions: [stale], totalCount: 1 }, { sessions: [stale] });
+  assert.equal(view.activeSessions, 0);
+  assert.equal(view.sessions[0]?.key, "stale");
+});
+
 test("Gateway hot-reload diff restarts only additions, changes, and removals", () => {
   const one = { id: "one", name: "One", url: "wss://one.example" };
   const changed = { ...one, name: "Changed" };

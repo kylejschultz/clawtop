@@ -75,3 +75,15 @@ test("preserves two generations that reuse one live session key", () => {
   assert.deepEqual(generations.map((item) => history.activities(item.historyId!)[0]?.status).sort(), ["first", "second"]);
   history.close();
 });
+
+test("history pages never expose persisted sessions as live active", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "clawtop-history-")), "history.sqlite");
+  const history = new HistoryStore(path);
+  const empty = createState("live", 1);
+  const active = reduceDashboard(empty, { type: "snapshot", gateway, agents: [], sessions: [{ key: "active", sessionId: "run", kind: "direct", hasActiveRun: true }], at: 10 });
+  history.persist(empty, active);
+  const session = history.page().sessions[0];
+  assert.equal(session?.state, "idle");
+  assert.equal(session?.activeSince, undefined);
+  history.close();
+});

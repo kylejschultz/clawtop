@@ -68,7 +68,7 @@ export class HistoryStore {
     const sessions = selected.flatMap((row) => {
       try {
         const stored = JSON.parse(row.metadata) as StoredSession;
-        return [{ ...stored, key: row.history_id, historyId: row.history_id, title: "Historical session", activity: this.activityRows(row.history_id, row.history_id, 40) }];
+        return [{ ...stored, key: row.history_id, historyId: row.history_id, title: "Historical session", state: "idle" as const, activeSince: undefined, activity: this.activityRows(row.history_id, row.history_id, 40) }];
       } catch { return []; }
     });
     return { sessions, nextBefore: more ? selected.at(-1)?.updated_at : undefined };
