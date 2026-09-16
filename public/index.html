@@ -15,7 +15,6 @@
     <div class="hero-intro">
       <div class="eyebrow">OpenClaw fleet monitor</div>
       <div class="brand"><span class="prompt" aria-hidden="true">$</span> clawtop <span class="readonly">read only</span></div>
-      <p>Live Gateway, agent, session, progress, and sanitized tool activity.</p>
     </div>
     <div id="connection" class="connection" role="status" aria-live="polite">connecting</div>
     <div class="hero-metrics" aria-label="Fleet totals">
@@ -48,8 +47,9 @@
         <section class="activity-panel" aria-labelledby="activity-stream-title">
           <div class="activity-head">
             <div><span class="section-kicker">Selected session</span><h3 id="activity-stream-title">live workstream</h3></div>
-            <span>progress + redaction-first tool summaries</span>
+            <span id="activity-summary">waiting for activity</span>
           </div>
+          <div id="current-activity" class="current-activity" hidden></div>
           <ol id="events" class="events"></ol>
         </section>
       </div>

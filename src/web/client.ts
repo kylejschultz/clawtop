@@ -1,6 +1,7 @@
 type ActivityState = "active" | "idle" | "unknown";
 type Activity = { id: string; at: number; kind: string; label: string; detail?: string; status?: string; runId?: string };
-type Gateway = { id: string; name: string; totalSessions?: number; activeSessions?: number; inactiveSessionsShown?: number; inactiveHistoryTruncated?: boolean; omittedInactiveSessions?: number; connection: { state: string; since: number; error?: string; serverVersion?: string } };
+type ActivityView = Activity & { repeats?: number; oldestAt?: number };
+type Gateway = { id: string; name: string; host?: string; totalSessions?: number; activeSessions?: number; inactiveSessionsShown?: number; inactiveHistoryTruncated?: boolean; omittedInactiveSessions?: number; connection: { state: string; since: number; error?: string; serverVersion?: string } };
 type Runtime = { id: string; source: string; fallback?: string; cloudPlacementSupported?: boolean; cloudPlacementExecutionMode?: string; devicePlacementSupported?: boolean; devicePlacement?: { consumesWorkerSlot: boolean } };
 type Placement = { state: string; providerId?: string; profileId?: string; machine?: { class?: string; os?: string; osLabel?: string }; runner?: { kind: "device"; status: "available" | "offline"; deviceId?: string } };
 type Progress = { revision: number; updatedAt: number; completed: number; total: number; step?: string; stepStatus?: "in_progress" | "pending" };
@@ -66,23 +67,20 @@ function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): 
   });
 
   const active = gateway.activeSessions ?? sessions.filter((session) => session.state === "active").length;
-  const inactive = gateway.inactiveSessionsShown ?? Math.max(0, sessions.length - active);
-  const total = gateway.totalSessions ?? sessions.length;
   const focus = sortSessions(sessions.filter((session) => session.state === "active"))[0];
   const focusText = focus?.progress?.step ?? focus?.title ?? "No active sessions";
+  const emoji = agents.find((agent) => agent.sourceId === "main")?.emoji ?? agents.find((agent) => agent.emoji)?.emoji;
   const heading = element("span", "gateway-heading");
-  heading.append(text("", `gateway-caret${expanded ? " open" : ""}`), text(gateway.name, "gateway-name"), text(gateway.connection.state, "gateway-state"));
+  heading.append(text("", `gateway-caret${expanded ? " open" : ""}`));
+  if (emoji) heading.append(text(emoji, "gateway-emoji"));
+  heading.append(text(gateway.name, "gateway-name"));
+  if (gateway.host) heading.append(text(gateway.host, "gateway-host"));
+  heading.append(text(gateway.connection.state, "gateway-state"));
   const version = gateway.connection.serverVersion ? `v${gateway.connection.serverVersion}` : "version unknown";
   heading.append(text(version, "gateway-version"));
 
   const stats = element("span", "gateway-stats");
-  stats.append(
-    metric(`${active}`, "active"),
-    metric(`${agents.length}`, "agents"),
-    metric(`${sessions.length}/${total}`, "sessions"),
-    metric(`${inactive}`, "recent idle")
-  );
-  if (gateway.omittedInactiveSessions) stats.append(metric(`${gateway.omittedInactiveSessions}`, "older hidden"));
+  stats.append(metric(`${active}`, "active"), metric(`${agents.length}`, "agents"));
 
   const now = element("span", `gateway-now${focus ? " live" : ""}`);
   now.append(text(focus ? "now" : "status", "gateway-now-label"), text(focusText, "gateway-now-text"));
@@ -201,20 +199,92 @@ function renderDetail(): void {
     if (session.progress.step) progress.append(text(session.progress.step, "progress-step"));
     progress.append(bar, text(`updated ${relative(session.progress.updatedAt)} · revision ${session.progress.revision}`, "progress-meta", "small"));
   }
-  const events = get("events");
-  events.replaceChildren(...(session.activity.length ? session.activity.map(renderEvent) : [text("No sanitized live activity received in this process.", "empty-row", "li")]));
+  renderActivity(session.activity);
   renderTimes();
 }
 
-function renderEvent(item: Activity): HTMLElement {
+function renderActivity(items: Activity[]): void {
+  const tools = items.filter((item) => item.kind === "tool").length;
+  get("activity-summary").textContent = items.length ? `${items.length} signals · ${tools} tool action${tools === 1 ? "" : "s"}` : "waiting for activity";
+  const current = get("current-activity") as HTMLElement;
+  current.hidden = items.length === 0;
+  current.replaceChildren();
+  const latest = items[0];
+  if (latest) {
+    const concrete = latest.kind === "agent" && latest.label === "thinking" ? items.find((item) => (item.kind === "tool" || item.kind === "progress") && item.runId === latest.runId && latest.at - item.at <= 60_000) : undefined;
+    const head = element("div", "current-activity-head");
+    const age = text(relative(latest.at), "current-activity-age");
+    age.dataset.at = String(latest.at);
+    head.append(text("Latest signal", "current-activity-kicker"), age);
+    current.append(head, text(activityLabel(latest), "current-activity-title"));
+    const detail = latest.detail ?? (concrete ? `Latest concrete action: ${concrete.detail ?? activityLabel(concrete)}` : activityDescription(latest));
+    if (detail) current.append(text(detail, "current-activity-detail", "code"));
+  }
+  const events = get("events");
+  events.replaceChildren(...(items.length ? activityRows(items).map(renderEvent) : [text("No sanitized live activity received in this process.", "empty-row", "li")]));
+}
+
+function activityRows(items: Activity[]): ActivityView[] {
+  const rows: ActivityView[] = [];
+  const repeated = new Map<string, ActivityView>();
+  for (const item of items) {
+    const canGroup = !item.detail && (item.kind === "agent" || item.kind === "session");
+    const key = canGroup ? `${item.runId ?? ""}:${item.kind}:${item.label}:${item.status ?? ""}` : "";
+    const current = key ? repeated.get(key) : undefined;
+    if (current) {
+      current.repeats = (current.repeats ?? 1) + 1;
+      current.oldestAt = item.at;
+    } else {
+      const row: ActivityView = { ...item };
+      rows.push(row);
+      if (key) repeated.set(key, row);
+    }
+  }
+  return rows;
+}
+
+function renderEvent(item: ActivityView): HTMLElement {
   const row = element("li", `event ${item.kind}`);
-  const time = text(clock(item.at), "", "time");
-  time.setAttribute("datetime", new Date(item.at).toISOString());
+  const time = element("span", "event-time");
+  const absolute = text(clock(item.at), "", "time");
+  absolute.setAttribute("datetime", new Date(item.at).toISOString());
+  const age = text(relative(item.at), "event-age");
+  age.dataset.at = String(item.at);
+  time.append(absolute, age);
   const content = element("span", "event-content");
-  content.append(text(item.label, "event-label"));
-  if (item.detail) content.append(text(item.detail, "event-detail", "code"));
-  row.append(time, text(item.kind, "event-kind"), content, text(item.status ?? "", "event-status"));
+  content.append(text(activityLabel(item), "event-label"));
+  const description = item.detail ?? activityDescription(item);
+  const detail = item.repeats && item.repeats > 1 ? `${item.repeats} similar signals over ${duration(item.at - (item.oldestAt ?? item.at))}${description ? ` · ${description}` : ""}` : description;
+  if (detail) content.append(text(detail, "event-detail", "code"));
+  const meta = element("span", "event-meta");
+  if (item.status) meta.append(text(item.status, "event-status"));
+  if (item.runId) meta.append(text(`run ${item.runId.slice(0, 8)}`, "event-run"));
+  row.append(time, text(item.kind, "event-kind"), content, meta);
   return row;
+}
+
+function activityLabel(item: Activity): string {
+  if (item.kind === "tool") return item.status === "running" || item.status === "start" ? `Running ${item.label}` : item.status === "result" || item.status === "completed" ? `${item.label} completed` : item.label;
+  if (item.kind === "progress") return "Progress updated";
+  if (item.kind === "session" && item.label === "message") return item.status === "running" ? "Processing message" : "Message activity";
+  const labels: Record<string, string> = {
+    start: "Response started",
+    thinking: "Model working",
+    finishing: "Finishing response",
+    final_answer: "Composing final answer",
+    end: "Response finished",
+    usage: "Usage updated"
+  };
+  return labels[item.label] ?? item.label.replaceAll("_", " ");
+}
+
+function activityDescription(item: Activity): string | undefined {
+  if (item.kind === "agent" && item.label === "thinking") return "Reasoning is active; private reasoning content is not exposed.";
+  if (item.kind === "session" && item.label === "message") return "The session is handling the current message.";
+  if (item.kind === "agent" && item.label === "usage") return "Usage counters changed for this run.";
+  if (item.kind === "agent") return `Agent lifecycle signal${item.status ? ` · ${item.status}` : ""}.`;
+  if (item.kind === "tool") return `Tool activity${item.status ? ` · ${item.status}` : ""}.`;
+  return undefined;
 }
 function renderTimes(): void {
   const session = state?.sessions[selected];
@@ -227,6 +297,10 @@ function renderTimes(): void {
   document.querySelectorAll<HTMLElement>(".gateway-since[data-gateway]").forEach((node) => {
     const gateway = state?.gateways[node.dataset.gateway ?? ""];
     if (gateway) node.textContent = `${gateway.connection.state} ${relative(gateway.connection.since)}`;
+  });
+  document.querySelectorAll<HTMLElement>(".event-age[data-at], .current-activity-age[data-at]").forEach((node) => {
+    const at = Number(node.dataset.at);
+    if (Number.isFinite(at)) node.textContent = relative(at);
   });
   if (state) get("metric-updated").textContent = relative(state.updatedAt);
 }

@@ -45,13 +45,15 @@ For Compose, copy `gateways.example.json` to an ignored private file:
 [
   {
     "id": "scruffy",
-    "name": "Scruffy / Unraid",
+    "name": "Scruffy",
+    "host": "Unraid",
     "url": "wss://scruffy.example.ts.net",
     "token": "replace-me"
   },
   {
     "id": "morrow",
-    "name": "Morrow / Lantern",
+    "name": "Morrow",
+    "host": "Lantern",
     "url": "wss://lantern.example.ts.net",
     "token": "replace-me"
   }
@@ -61,6 +63,7 @@ For Compose, copy `gateways.example.json` to an ignored private file:
 Set `CLAWTOP_MODE=live`, `CLAWTOP_HTTP_PASSWORD` to a long random password, and `CLAWTOP_GATEWAYS_FILE=/run/secrets/clawtop-gateways.json`. The committed `docker-compose.yml` bind-mounts the private file from `CLAWTOP_GATEWAYS_PATH`. The HTTP Basic username defaults to `clawtop` and can be changed with `CLAWTOP_HTTP_USERNAME`. `CLAWTOP_GATEWAYS` accepts the same array inline when an environment value is more convenient. Each entry supports:
 
 - `id`, `name`, and `url` (required); keep `id` stable even if the display name or route changes
+- `host` (optional) for the machine label shown separately from the Gateway name
 - at most one of `token`, `password`, or a short-lived `bootstrapToken` for initial authentication
 - `fingerprint` when certificate pinning is needed (`tlsFingerprint` remains accepted as a compatibility alias)
 
