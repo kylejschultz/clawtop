@@ -4,12 +4,12 @@ import { GATEWAY_CLIENT_CAPS, GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from 
 import { PROTOCOL_VERSION } from "@openclaw/gateway-protocol/version";
 import type { AgentSummary, ProgressCard } from "@openclaw/gateway-protocol";
 import type { EventFrame, HelloOk } from "@openclaw/gateway-protocol/frame-guards";
-import type { Config, GatewayConfig } from "./config.js";
+import type { AppSettings, Config, GatewayConfig } from "./config.js";
 import { createIdentityHost } from "./identity.js";
 import type { DashboardAction, GatewayRef, SessionWire } from "./model.js";
 
 type Dispatch = (action: DashboardAction) => void;
-export type ActivityAdapter = { start(): void; stop(): Promise<void> };
+export type ActivityAdapter = { start(): void; stop(): Promise<void>; update?(gateways: GatewayConfig[]): Promise<void>; refresh?(): void };
 type AgentsResult = { agents: AgentSummary[] };
 export type SessionsResult = { sessions: SessionWire[]; hasMore?: boolean; totalCount?: number; nextOffset?: number };
 export type SessionViewResult = SessionsResult & {
@@ -50,13 +50,44 @@ export class ExactSessionSubscriptions {
   }
 }
 
-export function createAdapter(config: Config, dispatch: Dispatch): ActivityAdapter {
+export function createAdapter(config: Config, dispatch: Dispatch, settings: () => AppSettings = () => config.settings): ActivityAdapter {
   if (config.mode === "demo") return new DemoAdapter(dispatch);
-  const adapters = config.gateways.map((gateway) => new LiveAdapter(gateway, config.dataDir, dispatch));
-  return {
-    start: () => { for (const adapter of adapters) adapter.start(); },
-    stop: async () => { await Promise.all(adapters.map((adapter) => adapter.stop())); }
-  };
+  return new LiveFleetAdapter(config.gateways, config.dataDir, dispatch, settings);
+}
+
+class LiveFleetAdapter implements ActivityAdapter {
+  private readonly adapters = new Map<string, { signature: string; adapter: LiveAdapter }>();
+  private started = false;
+  constructor(gateways: GatewayConfig[], private readonly dataDir: string, private readonly dispatch: Dispatch, private readonly settings: () => AppSettings) {
+    for (const gateway of gateways) this.add(gateway);
+  }
+  start(): void { this.started = true; for (const item of this.adapters.values()) item.adapter.start(); }
+  async stop(): Promise<void> { await Promise.all([...this.adapters.values()].map((item) => item.adapter.stop())); this.adapters.clear(); }
+  refresh(): void { for (const item of this.adapters.values()) item.adapter.refreshNow(); }
+  async update(gateways: GatewayConfig[]): Promise<void> {
+    const changes = gatewayChanges([...this.adapters.entries()].map(([id, item]) => ({ id, signature: item.signature })), gateways);
+    for (const id of changes.remove) {
+      const item = this.adapters.get(id);
+      if (!item) continue;
+      await item.adapter.stop();
+      this.adapters.delete(id);
+      this.dispatch({ type: "removeGateway", gatewayId: id, at: Date.now() });
+    }
+    for (const gateway of changes.add) { const adapter = this.add(gateway); if (this.started) adapter.start(); }
+  }
+  private add(gateway: GatewayConfig): LiveAdapter {
+    const adapter = new LiveAdapter(gateway, this.dataDir, this.dispatch, this.settings);
+    this.adapters.set(gateway.id, { signature: JSON.stringify(gateway), adapter });
+    return adapter;
+  }
+}
+
+export function gatewayChanges(current: Array<{ id: string; signature: string }>, next: GatewayConfig[]): { remove: string[]; add: GatewayConfig[] } {
+  const desired = new Map(next.map((gateway) => [gateway.id, gateway]));
+  const currentById = new Map(current.map((item) => [item.id, item.signature]));
+  const remove = current.filter((item) => !desired.has(item.id) || item.signature !== JSON.stringify(desired.get(item.id))).map((item) => item.id);
+  const add = next.filter((gateway) => currentById.get(gateway.id) !== JSON.stringify(gateway));
+  return { remove, add };
 }
 
 class LiveAdapter implements ActivityAdapter {
@@ -75,8 +106,9 @@ class LiveAdapter implements ActivityAdapter {
   private progressAgentScope = false;
   private sessions: SessionWire[] = [];
   private agents: AgentSummary[] = [];
+  private readonly eventBacklog: Array<{ frame: EventFrame; at: number }> = [];
 
-  constructor(config: GatewayConfig, dataDir: string, dispatch: Dispatch) {
+  constructor(config: GatewayConfig, dataDir: string, dispatch: Dispatch, private readonly settings: () => AppSettings) {
     const { identity, hostDeps } = createIdentityHost(join(dataDir, "gateways", config.id));
     this.gateway = { id: config.id, name: config.name, host: config.host };
     this.dispatch = dispatch;
@@ -121,6 +153,7 @@ class LiveAdapter implements ActivityAdapter {
     this.connection("connecting");
     this.client.start();
   }
+  refreshNow(): void { this.scheduleRefresh(0); }
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -143,12 +176,12 @@ class LiveAdapter implements ActivityAdapter {
         this.readActiveSessions()
       ]);
       const nextAgents = validAgents(agents);
-      const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent));
+      const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent), this.settings());
       if (revision !== this.snapshotRevision) return;
       this.agents = nextAgents;
       const needsTrailingRefresh = this.bootstrapDirty;
       this.bootstrapInFlight = false;
-      if (needsTrailingRefresh) await this.refresh();
+      if (needsTrailingRefresh) await this.refreshSnapshot();
       else {
         this.sessions = view.sessions;
         await this.publishSnapshot(view);
@@ -160,6 +193,11 @@ class LiveAdapter implements ActivityAdapter {
     }
   }
   private event(frame: EventFrame): void {
+    const at = Date.now();
+    if (frame.event !== "sessions.changed" && frame.event !== "session.observer") {
+      this.eventBacklog.push({ frame, at });
+      if (this.eventBacklog.length > 100) this.eventBacklog.shift();
+    }
     if (frame.event === "sessions.changed") {
       if (this.bootstrapInFlight) this.bootstrapDirty = true;
       else this.scheduleRefresh();
@@ -173,13 +211,13 @@ class LiveAdapter implements ActivityAdapter {
       if (session) void this.refreshProgress(session);
     }
     const payload = attachKnownSession(frame.payload, this.sessions);
-    this.dispatch({ type: "event", gateway: this.gateway, event: frame.event, payload, at: Date.now() });
+    this.dispatch({ type: "event", gateway: this.gateway, event: frame.event, payload, at });
   }
   private scheduleRefresh(delay = 200): void {
     if (this.refreshTimer || this.stopped) return;
-    this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; void this.refresh(); }, delay);
+    this.refreshTimer = setTimeout(() => { this.refreshTimer = undefined; void this.refreshSnapshot(); }, delay);
   }
-  private async refresh(): Promise<void> {
+  private async refreshSnapshot(): Promise<void> {
     const revision = ++this.snapshotRevision;
     try {
       const [recent, active] = await Promise.all([
@@ -187,7 +225,7 @@ class LiveAdapter implements ActivityAdapter {
         this.readActiveSessions()
       ]);
       if (revision !== this.snapshotRevision) return;
-      const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent));
+      const view = mergeSessionViews(recent, active ?? activeSessionsFromRecent(recent), this.settings());
       this.sessions = view.sessions;
       await this.publishSnapshot(view);
     } catch (error) {
@@ -205,6 +243,10 @@ class LiveAdapter implements ActivityAdapter {
       inactiveHistoryTruncated: result.inactiveHistoryTruncated,
       omittedInactiveSessions: result.omittedInactiveSessions
     });
+    for (const { frame, at } of this.eventBacklog) {
+      const payload = attachKnownSession(frame.payload, this.sessions);
+      this.dispatch({ type: "event", gateway: this.gateway, event: frame.event, payload, at });
+    }
     await this.subscriptions.reconcile(this.sessions);
     await Promise.all(this.sessions.filter(wantsProgressCard).map((session) => this.refreshProgress(session)));
   }
@@ -324,19 +366,20 @@ function activeSessionsFromRecent(recent: SessionsResult): SessionsResult {
   return { sessions: recent.sessions.filter(isActiveSession), hasMore: false };
 }
 
-export function mergeSessionViews(recent: SessionsResult, active: SessionsResult): SessionViewResult {
+export function mergeSessionViews(recent: SessionsResult, active: SessionsResult, settings: AppSettings = { inactiveSessionLimit: 200, inactiveAgeDays: 90 }, now = Date.now()): SessionViewResult {
   const activeById = new Map(active.sessions.map((session) => [subscriptionId(session), session]));
-  const merged = new Map(activeById);
-  for (const session of recent.sessions) if (!merged.has(subscriptionId(session))) merged.set(subscriptionId(session), session);
-  const inactiveSessionsShown = merged.size - activeById.size;
-  const omittedInactiveSessions = recent.totalCount === undefined
-    ? undefined
-    : Math.max(0, recent.totalCount - activeById.size - inactiveSessionsShown);
+  const cutoff = settings.inactiveAgeDays === "all" ? 0 : now - settings.inactiveAgeDays * 86400000;
+  const inactive = recent.sessions
+    .filter((session) => !activeById.has(subscriptionId(session)))
+    .filter((session) => { const at = session.lastActivityAt ?? session.updatedAt; return cutoff === 0 || at == null || at >= cutoff; })
+    .slice(0, settings.inactiveSessionLimit);
+  const sessions = [...activeById.values(), ...inactive];
+  const omittedInactiveSessions = recent.totalCount === undefined ? undefined : Math.max(0, recent.totalCount - activeById.size - inactive.length);
   return compact({
-    sessions: [...merged.values()],
+    sessions,
     totalCount: recent.totalCount,
     activeSessions: activeById.size,
-    inactiveSessionsShown,
+    inactiveSessionsShown: inactive.length,
     inactiveHistoryTruncated: omittedInactiveSessions === undefined ? undefined : omittedInactiveSessions > 0,
     omittedInactiveSessions
   });

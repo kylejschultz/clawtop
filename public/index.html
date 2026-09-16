@@ -14,9 +14,9 @@
   <header class="hero">
     <div class="hero-intro">
       <div class="eyebrow">OpenClaw fleet monitor</div>
-      <div class="brand"><span class="prompt" aria-hidden="true">$</span> clawtop <span class="readonly">read only</span></div>
+      <div class="brand"><span class="prompt" aria-hidden="true">$</span> clawtop</div>
     </div>
-    <div id="connection" class="connection" role="status" aria-live="polite">connecting</div>
+    <div class="hero-actions"><div id="connection" class="connection" role="status" aria-live="polite">connecting</div><button id="settings-open" class="icon-button" type="button" aria-label="Open settings" title="Settings">⚙</button></div>
     <div class="hero-metrics" aria-label="Fleet totals">
       <div class="hero-metric"><span id="metric-gateways">0/0</span><small>gateways</small></div>
       <div class="hero-metric"><span id="metric-agents">0</span><small>agents</small></div>
@@ -32,6 +32,7 @@
         <span id="counts">0 shown</span>
       </div>
       <div id="tree" class="tree" aria-live="polite"></div>
+      <button id="load-history" class="load-history" type="button">Load older sessions</button>
     </section>
     <section id="detail" class="detail" aria-labelledby="detail-title" tabindex="-1">
       <div id="empty" class="empty">Select a session to inspect its safe live projection.</div>
@@ -50,10 +51,28 @@
             <span id="activity-summary">waiting for activity</span>
           </div>
           <ol id="events" class="events"></ol>
+          <button id="load-events" class="load-history" type="button">Load older activity</button>
         </section>
       </div>
     </section>
   </main>
-  <footer><span>Gateway credentials and raw tool inputs remain server-side.</span><span id="mode">mode: —</span></footer>
+  <footer><span>Gateway credentials and raw tool inputs remain server-side. <a href="https://kschultz.dev" rel="noopener noreferrer">kschultz.dev</a></span><span id="mode">mode: —</span></footer>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <form id="settings-form">
+      <div class="modal-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="icon-button" type="button" aria-label="Close settings">×</button></div>
+      <p id="settings-error" class="form-error" role="alert" hidden></p>
+      <fieldset><legend>Inactive sessions</legend>
+        <label>Maximum shown <input id="inactive-limit" type="number" min="0" max="200" required></label>
+        <label>Maximum age <select id="inactive-age"><option>1</option><option>3</option><option>7</option><option>14</option><option>30</option><option>90</option><option value="all">all</option></select> days</label>
+      </fieldset>
+      <div class="gateway-form-head"><h3>Gateways</h3><button id="gateway-add" type="button">Add Gateway</button></div>
+      <div id="gateway-forms"></div>
+      <div class="modal-actions"><button id="settings-cancel" type="button">Cancel</button><button type="submit">Save</button></div>
+    </form>
+  </dialog>
+  <template id="gateway-template"><fieldset class="gateway-form"><legend>Gateway</legend>
+    <div class="form-grid"><label>ID <input name="id" required pattern="[a-z0-9][a-z0-9._-]{0,63}"></label><label>Name <input name="name" required></label><label>Host <input name="host"></label><label>WebSocket URL <input name="url" type="url" required></label><label>TLS fingerprint <input name="tlsFingerprint"></label><label>Authentication <select name="authMethod"><option value="none">None</option><option value="token">Token</option><option value="password">Password</option><option value="bootstrapToken">Bootstrap token</option></select></label><label>Replacement secret <input name="secret" type="password" autocomplete="new-password"></label></div>
+    <label class="check"><input name="clearSecret" type="checkbox"> Explicitly clear configured secret</label><button class="gateway-remove" type="button">Remove Gateway</button>
+  </fieldset></template>
 </body>
 </html>

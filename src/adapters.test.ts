@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createActiveSessionFetcher, createDerivedTitleRequest, ExactSessionSubscriptions, fetchActiveSessions, mergeSessionViews, subscribeSessions } from "./adapters.js";
+import { createActiveSessionFetcher, createDerivedTitleRequest, ExactSessionSubscriptions, fetchActiveSessions, gatewayChanges, mergeSessionViews, subscribeSessions } from "./adapters.js";
 import type { SessionWire } from "./model.js";
 
 const row = (key: string, agentId = "main"): SessionWire => ({ key, kind: "direct", agentId });
@@ -54,6 +54,23 @@ test("merges every active session into the bounded recent page and counts hidden
   assert.equal(view.inactiveHistoryTruncated, true);
   assert.equal(view.omittedInactiveSessions, 1);
   assert.equal(mergeSessionViews({ sessions: [row("global", "main")] }, { sessions: [row("global", "research")] }).sessions.length, 2);
+});
+
+test("active sessions bypass inactive age and count filters", () => {
+  const old = { ...row("old"), updatedAt: 1 };
+  const active = { ...row("active"), updatedAt: 1, status: "running" as const };
+  const view = mergeSessionViews({ sessions: [old, active], totalCount: 2 }, { sessions: [active] }, { inactiveSessionLimit: 0, inactiveAgeDays: 1 }, 10 * 86400000);
+  assert.deepEqual(view.sessions.map((session) => session.key), ["active"]);
+  assert.equal(view.omittedInactiveSessions, 1);
+});
+
+test("Gateway hot-reload diff restarts only additions, changes, and removals", () => {
+  const one = { id: "one", name: "One", url: "wss://one.example" };
+  const changed = { ...one, name: "Changed" };
+  const two = { id: "two", name: "Two", url: "wss://two.example" };
+  const diff = gatewayChanges([{ id: "one", signature: JSON.stringify(one) }, { id: "gone", signature: "{}" }], [changed, two]);
+  assert.deepEqual(diff.remove, ["one", "gone"]);
+  assert.deepEqual(diff.add, [changed, two]);
 });
 
 test("paginates activeOnly reads until every active session is present", async () => {
