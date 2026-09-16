@@ -43,6 +43,7 @@ export type DashboardProgress = {
 };
 export type DashboardSession = {
   key: string;
+  historyId?: string;
   sourceKey: string;
   gatewayId: string;
   sessionId?: string;
@@ -78,7 +79,8 @@ export type DashboardAction =
   | { type: "connection"; gateway: GatewayRef; state: ConnectionState; at: number; error?: string; serverVersion?: string }
   | { type: "snapshot"; gateway: GatewayRef; agents: AgentSummary[]; sessions: SessionWire[]; at: number; totalSessions?: number; activeSessions?: number; inactiveSessionsShown?: number; inactiveHistoryTruncated?: boolean; omittedInactiveSessions?: number }
   | { type: "progressCard"; gateway: GatewayRef; sourceKey: string; sourceAgentId?: string; card: ProgressCard | null; at: number }
-  | { type: "event"; gateway: GatewayRef; event: string; payload: unknown; at: number };
+  | { type: "event"; gateway: GatewayRef; event: string; payload: unknown; at: number }
+  | { type: "removeGateway"; gatewayId: string; at: number };
 
 export type SessionWire = SessionRow & {
   hasActiveRun?: boolean;
@@ -93,6 +95,11 @@ export function createState(mode: "demo" | "live", now = Date.now()): DashboardS
 }
 
 export function reduceDashboard(state: DashboardState, action: DashboardAction): DashboardState {
+  if (action.type === "removeGateway") {
+    const gateways = { ...state.gateways };
+    delete gateways[action.gatewayId];
+    return { ...state, gateways, agents: withoutGateway(state.agents, action.gatewayId), sessions: withoutGateway(state.sessions, action.gatewayId), updatedAt: action.at };
+  }
   if (action.type === "connection") {
     const previous = state.gateways[action.gateway.id]?.connection;
     return {

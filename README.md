@@ -14,7 +14,7 @@ A small, self-hosted, **read-only** terminal-style dashboard for live OpenClaw f
 - Explicit session names with visibility-scoped, first-message-derived titles as a fallback when the Gateway supports them
 - Demo data for two Gateways with no OpenClaw configuration
 
-Clawtop never calls Gateway write/control methods or activates observer work. Tool arguments, outputs, prompts, progress-card Markdown, credentials, URLs, and raw event payloads are not retained in browser state. When supported, Clawtop requests the Gateway's visibility-scoped `derivedTitle`; an explicit session label still takes precedence. The browser otherwise receives only normalized labels, state, timing, source IDs, Gateway identity, and bounded status/progress fields. Recent signals are process-memory-only and capped at 40 per session.
+Clawtop never calls Gateway write/control methods or activates observer work. Tool outputs, prompts, progress-card Markdown, credentials, and raw event payloads are not retained in browser state. Live memory may include bounded, sanitized command/title detail; durable history never stores that detail. When supported, Clawtop requests the Gateway's visibility-scoped `derivedTitle`; an explicit session label still takes precedence. SQLite retains only allowlisted session identity/timing fields and structural activity fields (event/tool label, status, run ID, and timestamps) for 90 days by default. The 1 GiB bound measures the database together with WAL/SHM after checkpoints, and old session metadata is removed only after detailed events when required to meet it.
 
 Unknown runtime and placement fields are omitted rather than inferred. In particular, Clawtop does not treat an absent placement, machine, or runner as local, offline, or unavailable.
 
@@ -61,7 +61,7 @@ For Compose, copy `gateways.example.json` to an ignored private file:
 ]
 ```
 
-Set `CLAWTOP_MODE=live`, `CLAWTOP_HTTP_PASSWORD` to a long random password, and `CLAWTOP_GATEWAYS_FILE=/run/secrets/clawtop-gateways.json`. The committed `docker-compose.yml` bind-mounts the private file from `CLAWTOP_GATEWAYS_PATH`. The HTTP Basic username defaults to `clawtop` and can be changed with `CLAWTOP_HTTP_USERNAME`. `CLAWTOP_GATEWAYS` accepts the same array inline when an environment value is more convenient. Each entry supports:
+Place this file at `${CLAWTOP_DATA_PATH}/gateways.json` (mounted as `/data/gateways.json`), set `CLAWTOP_MODE=live`, and set `CLAWTOP_HTTP_PASSWORD` to a long random password. `/data/gateways.json` is authoritative after startup: authenticated same-origin settings writes update it atomically, and valid external atomic replacements hot-reload added, changed, and removed connections. Invalid external edits leave the last valid configuration running and expose only a bounded error. Legacy list/file/shorthand variables are accepted only to seed the file when it does not exist. Each entry supports:
 
 - `id`, `name`, and `url` (required); keep `id` stable even if the display name or route changes
 - `host` (optional) for the machine label shown separately from the Gateway name
@@ -72,7 +72,7 @@ Gateway IDs must be unique. They namespace otherwise-colliding agent/session IDs
 
 ### Single-Gateway shorthand
 
-A one-Gateway deployment can omit the JSON list:
+For first-run migration only, a one-Gateway deployment can seed `/data/gateways.json` with:
 
 ```dotenv
 CLAWTOP_MODE=live
@@ -85,7 +85,7 @@ OPENCLAW_GATEWAY_TOKEN=replace-me
 CLAWTOP_DATA_DIR=/data
 ```
 
-Do not combine the shorthand with a Gateway list.
+Do not combine the shorthand with a Gateway list. Remove the migration variables after `/data/gateways.json` exists.
 
 ### Pairing and credential lifecycle
 
@@ -108,28 +108,29 @@ Prefer `wss://` for Gateway connections. The official client accepts plaintext o
 
 ```bash
 cp .env.example .env
-cp gateways.example.json gateways.json
-# edit both private files
+mkdir -p data
+cp gateways.example.json data/gateways.json
+# edit .env and data/gateways.json privately
 
 docker compose pull
 docker compose up -d
 ```
 
-Pushes to `main` publish `ghcr.io/kylejschultz/clawtop:latest`; version tags also publish their semantic version, and every build receives an immutable `sha-<commit>` tag. The Compose file uses host bind mounts—not an anonymous or named Docker volume—so identities and paired tokens remain in `CLAWTOP_DATA_PATH`, while the private Gateway list comes from `CLAWTOP_GATEWAYS_PATH`. It publishes port `3333` on the host by default; keep that host behind a trusted LAN/tailnet and use TLS or an authenticated reverse proxy before exposing it more broadly. The container runs unprivileged, drops capabilities, uses a read-only root filesystem, and writes only to `/data`. Authenticated `/api/health` returns `200` only when every configured Gateway is connected; its body reports each Gateway's state plus aggregate Gateway/agent/session counts without URLs or credentials.
+Pushes to `main` publish `ghcr.io/kylejschultz/clawtop:latest`; version tags also publish their semantic version, and every build receives an immutable `sha-<commit>` tag. The Compose file uses host bind mounts—not an anonymous or named Docker volume—so identities and paired tokens remain in `CLAWTOP_DATA_PATH`, including the authoritative Gateway list, app settings, identities, and sanitized SQLite history. It publishes port `3333` on the host by default; keep that host behind a trusted LAN/tailnet and use TLS or an authenticated reverse proxy before exposing it more broadly. The container runs unprivileged, drops capabilities, uses a read-only root filesystem, and writes only to `/data`. Authenticated `/api/health` returns `200` only when every configured Gateway is connected; its body reports each Gateway's state plus aggregate Gateway/agent/session counts without URLs or credentials.
 
 ## Unraid: Scruffy plus remote Morrow
 
 Create an authoritative `clawtop` Compose Manager project from the committed `docker-compose.yml`; keep Unraid-only WebUI/icon labels in its local `docker-compose.override.yml`. Use `ghcr.io/kylejschultz/clawtop:latest` and advance it only with an explicit pull and recreate.
 
-1. Copy `.env.example` to the project's private `.env`. Set `CLAWTOP_DATA_PATH=/mnt/user/appdata/clawtop`, `CLAWTOP_GATEWAYS_PATH=/mnt/user/appdata/clawtop/gateways.json`, `CLAWTOP_MODE=live`, and a long `CLAWTOP_HTTP_PASSWORD`.
-2. Copy `gateways.example.json` to `/mnt/user/appdata/clawtop/gateways.json` and fill it privately. Make the data directory writable by container UID 1000 and the Gateway file readable by that UID; the JSON is mounted read-only.
+1. Copy `.env.example` to the project's private `.env`. Set `CLAWTOP_DATA_PATH=/mnt/user/appdata/clawtop`, `CLAWTOP_MODE=live`, and a long `CLAWTOP_HTTP_PASSWORD`.
+2. Copy `gateways.example.json` to `/mnt/user/appdata/clawtop/gateways.json` and fill it privately. Make the entire data directory writable only by the container owner (UID 1000); the settings UI and external atomic replacements both write this authoritative file.
 3. Configure Scruffy as one Gateway entry using its private host route.
 4. Expose Lantern/Morrow to Unraid through a secure `wss://` tailnet route (recommended), then add it as the second entry. Do not expose Lantern's Gateway broadly or send credentials over plaintext between hosts.
 5. Start Clawtop and approve its device separately on Scruffy and Morrow.
 6. Remove shared bootstrap credentials after paired device tokens are saved, then verify both Gateway roots show connected.
 7. Expose port `3333` only on a trusted interface or through TLS on a trusted tailnet/authenticated reverse proxy.
 
-No dynamic configuration UI is included; Gateway membership is intentionally deployment configuration.
+The settings gear edits Gateway membership and inactive-session filters. Stored secrets are never returned to the browser: replacement inputs are write-only, unchanged secrets are preserved, and clearing requires the explicit checkbox.
 
 ## Development
 
@@ -144,7 +145,8 @@ npm start
 - `src/config.ts` validates list/file/shorthand configuration.
 - `src/adapters.ts` owns one official client and credential boundary per Gateway.
 - `src/model.ts` namespaces and merges Gateway snapshots/events in a pure reducer.
-- `src/server.ts` serves static assets, `/api/state`, `/api/health`, and `/api/events`.
+- `src/server.ts` serves static assets, state/SSE, bounded history reads, and authenticated same-origin settings writes.
+- `src/history.ts` stores only normalized safe events and compact session metadata in built-in `node:sqlite`.
 - `src/web/client.ts` renders the dependency-free accessible fleet tree.
 
 ## Verified contract and deliberate limits
@@ -154,13 +156,13 @@ Verified against OpenClaw package `2026.9.4` declarations/runtime and matching p
 - `GatewayClient` supports challenge-authenticated Node connections, reconnects, requests, events, and host-owned identity/token persistence.
 - The exact Gateway RPC allowlist is `agents.list`, `sessions.subscribe`, `sessions.list`, `sessions.messages.subscribe`, `sessions.messages.unsubscribe`, and `progressCard.get`. The message subscriptions never request approval events; Clawtop does not call `sessions.observer.visibility`.
 - Clawtop reconciles exact-session message subscriptions only for the merged sessions displayed in each snapshot, resets them across reconnects, and performs a trailing `sessions.list` when `sessions.changed` races the bootstrap response.
-- Session-list requests do not enable derived transcript titles. Titles come only from explicit `label`, `displayName`, or `autoLabel` fields, then fall back to the session key.
+- When supported, session-list requests enable visibility-scoped derived titles. Explicit `label` still takes precedence, followed by `derivedTitle`, `displayName`, `autoLabel`, and finally the session key; older Gateways fall back without failing refreshes.
 - Event/progress history survives a snapshot only when the Gateway supplies the same stable `sessionId`; missing or changed IDs reset lifecycle state so reused session keys cannot inherit stale activity.
 - `agents.list` supplies configured `agentRuntime` metadata. `sessions.list` supplies effective per-session runtime/model-provider facts and, when enabled, the closed placement projection including provider/profile, machine, and device-runner status.
 - The safe browser projection intentionally drops placement workspace paths, environment IDs, bundle/manifests, ACK cursors, command requirements, progress-card Markdown, and other control-plane internals. A progress card contributes only revision/time, completed/total counts, and one bounded current-or-next step.
 - `hasActiveRun` / `activeRunIds` are documented but absent from the published `SessionRow` declaration; Clawtop isolates that additive mismatch in `SessionWire` and treats absence as **unknown**.
-- Clawtop merges every active session (retrieved with paginated `activeOnly` reads) with one recent-history page of up to 200 sessions per Gateway. Active pages follow `hasMore`/`nextOffset`; missing or non-advancing pagination metadata fails the refresh visibly instead of publishing an incomplete active set. When Gateway totals make it detectable, the UI reports how many inactive sessions are shown and hidden. The 200-row bound applies only to recent history: Clawtop imposes no active-session or concurrent-run cap, and any Gateway/runtime concurrency limit is separate.
+- Clawtop merges every active session (retrieved with paginated `activeOnly` reads) with one recent-history page bounded by the configured inactive-session limit (a zero display limit uses the protocol minimum request of one). Active pages follow `hasMore`/`nextOffset`; missing or non-advancing pagination metadata fails the refresh visibly instead of publishing an incomplete active set. Active sessions always bypass inactive age/count filters and have no Clawtop-imposed cap.
 - SSE clients default to a maximum of 32 (`CLAWTOP_MAX_SSE_CLIENTS`); excess connections receive `503`. Slow clients retain only the latest pending state and flush it after backpressure clears.
-- Event summaries are in memory only; there are no transcript, tool-output, cost, approval, control, durable-storage, or dynamic-config surfaces.
+- Durable history contains only allowlisted structural fields—never titles, command detail, prompts, private reasoning, raw tool inputs/outputs, credentials, URLs, or raw payloads. Upgrading from the earlier history schema clears and vacuums its unsafe rows. The local write surface is limited to authenticated same-origin JSON settings updates under `/data`; Gateway operations remain strictly read-only.
 
-Live multi-Gateway integration has **not** been tested against the real Morrow and Scruffy Gateways; it still requires their routes, credentials, and pairing approval. Demo mode, configuration parsing, cross-Gateway namespace isolation, connection recovery, per-Gateway identity storage, reducer behavior, production build, and HTTP/SSE serving are locally testable.
+Live multi-Gateway integration is exercised against Morrow, Scruffy, and legacy Gateway Zoidberg. Automated checks cover configuration parsing, cross-Gateway namespace isolation, connection recovery, per-Gateway identity storage, reducer behavior, history safety, production builds, and HTTP/SSE serving.
