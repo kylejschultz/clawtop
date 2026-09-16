@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="description" content="Read-only OpenClaw fleet activity dashboard">
   <title>Clawtop</title>
@@ -10,7 +10,7 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <a class="skip" href="#detail">Skip to session detail</a>
+  <a class="skip" href="#fleet">Skip to workspace</a>
   <header class="hero">
     <div class="hero-intro">
       <div class="eyebrow">OpenClaw fleet monitor</div>
@@ -25,8 +25,8 @@
       <div class="hero-metric"><span id="metric-updated">never</span><small>last signal</small></div>
     </div>
   </header>
-  <main>
-    <section class="rail" aria-labelledby="activity-title">
+  <main data-mobile-pane="fleet">
+    <section id="fleet" class="rail" aria-labelledby="activity-title" tabindex="-1">
       <div class="section-head">
         <div><span class="section-kicker">Workspace</span><h1 id="activity-title">Gateways, agents, and sessions</h1></div>
         <span id="counts">0 shown</span>
@@ -60,6 +60,10 @@
       </div>
     </section>
   </main>
+  <nav class="mobile-nav" aria-label="Workspace panes">
+    <button id="mobile-fleet" type="button" aria-controls="fleet" aria-current="page" aria-pressed="true"><span aria-hidden="true">◇</span><span>Fleet</span></button>
+    <button id="mobile-session" type="button" aria-controls="detail" aria-label="Session unavailable; select a session from Fleet" aria-pressed="false" disabled><span aria-hidden="true">▤</span><span>Session</span></button>
+  </nav>
   <footer><span>Gateway credentials and raw tool inputs remain server-side. <a href="https://kschultz.dev" rel="noopener noreferrer">kschultz.dev</a></span><span id="mode">mode: —</span></footer>
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <form id="settings-form">

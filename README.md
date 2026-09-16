@@ -18,6 +18,10 @@ A small, self-hosted, **read-only** observability workspace for live OpenClaw fl
 
 Clawtop never calls Gateway write/control methods or activates observer work. Tool outputs, prompts, progress-card Markdown, credentials, and raw event payloads are not retained in browser state. Live memory may include bounded, sanitized command/title detail; durable history never stores that detail. When supported, Clawtop requests the Gateway's visibility-scoped `derivedTitle`; an explicit session label still takes precedence. SQLite retains only allowlisted session identity/timing fields and structural activity fields (event/tool label, status, run ID, and timestamps) for 90 days by default. The 1 GiB bound measures the database together with WAL/SHM after checkpoints, and old session metadata is removed only after detailed events when required to meet it.
 
+### Mobile workspace
+
+At 700px and narrower, Clawtop becomes a single-viewport two-pane app. **Fleet** contains the Gateway tree and independent Live/History switch; choosing a session opens and locks the **Session** pane, while the persistent bottom navigation returns to Fleet without losing selection. Each pane scrolls locally, fleet metrics scroll horizontally, and settings use a phone-sized single-column dialog. The Session destination remains unavailable when no session is selected.
+
 Unknown runtime and placement fields are omitted rather than inferred. In particular, Clawtop does not treat an absent placement, machine, or runner as local, offline, or unavailable.
 
 ## Topology boundary
