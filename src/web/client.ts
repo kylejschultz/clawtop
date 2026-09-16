@@ -24,6 +24,12 @@ const stableWorkNotes = new Map<string, StableWorkNote>();
 const expandedGateways = new Set<string>();
 const collapsedParents = new Set<string>();
 let viewMode: "live" | "history" = "live";
+type MobilePane = "fleet" | "session";
+let mobilePane: MobilePane = "fleet";
+const mobileQuery = window.matchMedia("(max-width: 700px)");
+const workspaceNode = document.querySelector("main");
+if (!(workspaceNode instanceof HTMLElement)) throw new Error("missing workspace");
+const workspace: HTMLElement = workspaceNode;
 const tree = get("tree");
 const detailContent = get("detail-content") as HTMLElement;
 const empty = get("empty") as HTMLElement;
@@ -76,6 +82,7 @@ function render(): void {
     sessions.filter((session) => session.gatewayId === gateway.id)
   )));
   renderDetail();
+  syncMobileNavigation();
 }
 
 function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): HTMLElement {
@@ -187,6 +194,7 @@ function appendSession(parent: HTMLElement, session: Session, byKey: Map<string,
     eventBoundaryConsumed = false;
     get("events").scrollTop = 0;
     render();
+    setMobilePane("session", true);
   });
   button.append(text("", `dot ${session.state}`));
   const label = element("span", "session-title");
@@ -487,6 +495,13 @@ get("settings-cancel").addEventListener("click", () => settingsDialog.close());
 get("gateway-add").addEventListener("click", () => appendGatewayForm());
 get("view-live").addEventListener("click", () => setView("live"));
 get("view-history").addEventListener("click", () => setView("history"));
+get("mobile-fleet").addEventListener("click", () => setMobilePane("fleet", true));
+get("mobile-session").addEventListener("click", () => setMobilePane("session", true));
+document.querySelector(".skip")?.addEventListener("click", (event) => {
+  if (!mobileQuery.matches || !selectedSession()) return;
+  event.preventDefault();
+  setMobilePane("session", true);
+});
 tree.addEventListener("scroll", () => {
   if (!nearEnd(tree)) historyBoundaryConsumed = false;
   else if (viewMode === "history" && !historyBoundaryConsumed) { historyBoundaryConsumed = true; void loadOlderSessions(); }
@@ -539,6 +554,34 @@ async function saveSettings(): Promise<void> {
   settingsDialog.close();
 }
 function showSettingsError(message?: string): void { const node = get("settings-error"); node.hidden = !message; node.textContent = message ?? ""; }
+function selectedSession(): Session | undefined {
+  return viewMode === "live" ? state?.sessions[selected] ?? focusedSession : historicalSessions.get(selected);
+}
+function syncMobileNavigation(): void {
+  const available = Boolean(selectedSession());
+  if (!available && mobilePane === "session") mobilePane = "fleet";
+  workspace.dataset.mobilePane = mobilePane;
+  const fleet = get("mobile-fleet") as HTMLButtonElement;
+  const session = get("mobile-session") as HTMLButtonElement;
+  fleet.setAttribute("aria-pressed", String(mobilePane === "fleet"));
+  session.setAttribute("aria-pressed", String(mobilePane === "session"));
+  if (mobilePane === "fleet") {
+    fleet.setAttribute("aria-current", "page");
+    session.removeAttribute("aria-current");
+  } else {
+    session.setAttribute("aria-current", "page");
+    fleet.removeAttribute("aria-current");
+  }
+  session.disabled = !available;
+  session.setAttribute("aria-label", available ? "Show selected session" : "Session unavailable; select a session from Fleet");
+}
+function setMobilePane(next: MobilePane, moveFocus: boolean): void {
+  if (next === "session" && !selectedSession()) return;
+  mobilePane = next;
+  syncMobileNavigation();
+  if (!moveFocus || !mobileQuery.matches) return;
+  window.requestAnimationFrame(() => get(next === "fleet" ? "fleet" : "detail").focus({ preventScroll: true }));
+}
 function setView(next: "live" | "history"): void {
   if (viewMode === next) return;
   if (viewMode === "live") liveSelected = selected;
