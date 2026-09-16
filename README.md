@@ -11,8 +11,7 @@ A small, self-hosted, **read-only** observability workspace for live OpenClaw fl
 - Active, idle, and unknown states without guessing unknown into idle
 - Verified runtime and placement facts when projected by the Gateway: agent runtime/harness, model provider, placement state/provider/profile, machine class/OS label, and paired-device runner availability
 - Active elapsed time, last-signal age, stable normalized work notes, sanitized progress-card summaries, and safe recent signals
-- Separate live and lazily paged durable-history views, with automatic workstream pagination
-- A deliberately flat History list because sanitized generations cannot safely reconstruct live parent/child links
+- A live-only workspace that includes configured inactive-session snapshots, with stored older events paged into the selected session's workstream
 - Explicit session names with visibility-scoped, first-message-derived titles as a fallback when the Gateway supports them
 - Demo data for two Gateways with no OpenClaw configuration
 
@@ -20,7 +19,7 @@ Clawtop never calls Gateway write/control methods or activates observer work. To
 
 ### Mobile workspace
 
-At 700px and narrower, Clawtop becomes a single-viewport two-pane app. **Fleet** contains the Gateway tree and independent Live/History switch; choosing a session opens and locks the **Session** pane, while the persistent bottom navigation returns to Fleet without losing selection. Each pane scrolls locally, fleet metrics scroll horizontally, and settings use a phone-sized single-column dialog. The Session destination remains unavailable when no session is selected.
+At 700px and narrower, Clawtop becomes a single-viewport two-pane app. **Fleet** contains the live Gateway tree; choosing a session opens and locks the **Session** pane, while the persistent bottom navigation returns to Fleet without losing selection. Each pane scrolls locally, fleet metrics scroll horizontally, and settings use a phone-sized single-column dialog. The Session destination remains unavailable when no session is selected.
 
 Unknown runtime and placement fields are omitted rather than inferred. In particular, Clawtop does not treat an absent placement, machine, or runner as local, offline, or unavailable.
 
@@ -136,7 +135,7 @@ Create an authoritative `clawtop` Compose Manager project from the committed `do
 6. Remove shared bootstrap credentials after paired device tokens are saved, then verify both Gateway roots show connected.
 7. Expose port `3333` only on a trusted interface or through TLS on a trusted tailnet/authenticated reverse proxy.
 
-The settings gear edits Gateway membership and inactive-session filters. Stored secrets are never returned to the browser: replacement inputs are write-only, unchanged secrets are preserved, and clearing requires the explicit checkbox.
+The settings gear edits Gateway membership and inactive-session filters. Gateway editors are independently collapsible. Stored secrets and TLS fingerprints are never returned to the browser: replacement secret inputs are write-only, unchanged secrets and file-configured fingerprints are preserved, and clearing authentication requires the explicit checkbox.
 
 ## Development
 
