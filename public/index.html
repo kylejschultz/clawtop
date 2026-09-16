@@ -4,39 +4,57 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="Read-only OpenClaw activity dashboard">
+  <meta name="description" content="Read-only OpenClaw fleet activity dashboard">
   <title>Clawtop</title>
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <a class="skip" href="#detail">Skip to detail</a>
-  <header>
-    <div class="brand"><span class="prompt" aria-hidden="true">$</span> clawtop <span class="readonly">read only</span></div>
+  <a class="skip" href="#detail">Skip to session detail</a>
+  <header class="hero">
+    <div class="hero-intro">
+      <div class="eyebrow">OpenClaw fleet monitor</div>
+      <div class="brand"><span class="prompt" aria-hidden="true">$</span> clawtop <span class="readonly">read only</span></div>
+      <p>Live Gateway, agent, session, progress, and sanitized tool activity.</p>
+    </div>
     <div id="connection" class="connection" role="status" aria-live="polite">connecting</div>
+    <div class="hero-metrics" aria-label="Fleet totals">
+      <div class="hero-metric"><span id="metric-gateways">0/0</span><small>gateways</small></div>
+      <div class="hero-metric"><span id="metric-agents">0</span><small>agents</small></div>
+      <div class="hero-metric"><span id="metric-sessions">0</span><small>sessions shown</small></div>
+      <div class="hero-metric active"><span id="metric-active">0</span><small>active now</small></div>
+      <div class="hero-metric"><span id="metric-updated">never</span><small>last signal</small></div>
+    </div>
   </header>
   <main>
     <section class="rail" aria-labelledby="activity-title">
       <div class="section-head">
-        <h1 id="activity-title">gateways / agents / sessions</h1>
-        <span id="counts">0 gateways · 0 agents · 0 sessions</span>
+        <div><span class="section-kicker">Fleet index</span><h1 id="activity-title">gateways / agents / sessions</h1></div>
+        <span id="counts">0 shown</span>
       </div>
       <div id="tree" class="tree" aria-live="polite"></div>
     </section>
     <section id="detail" class="detail" aria-labelledby="detail-title" tabindex="-1">
       <div id="empty" class="empty">Select a session to inspect its safe live projection.</div>
-      <div id="detail-content" hidden>
-        <div class="detail-head">
-          <div><span id="detail-state" class="state"></span><h2 id="detail-title"></h2></div>
-          <span id="elapsed" class="clock"></span>
-        </div>
-        <dl id="facts"></dl>
-        <div id="progress" class="progress-card" hidden></div>
-        <h3>recent signals <span class="muted">newest first · ephemeral</span></h3>
-        <ol id="events" class="events"></ol>
+      <div id="detail-content" class="detail-content" hidden>
+        <section class="session-overview" aria-label="Selected session overview">
+          <div class="detail-head">
+            <div><span id="detail-state" class="state"></span><h2 id="detail-title"></h2></div>
+            <span id="elapsed" class="clock"></span>
+          </div>
+          <div id="progress" class="progress-card" hidden></div>
+          <dl id="facts"></dl>
+        </section>
+        <section class="activity-panel" aria-labelledby="activity-stream-title">
+          <div class="activity-head">
+            <div><span class="section-kicker">Selected session</span><h3 id="activity-stream-title">live workstream</h3></div>
+            <span>progress + redaction-first tool summaries</span>
+          </div>
+          <ol id="events" class="events"></ol>
+        </section>
       </div>
     </section>
   </main>
-  <footer><span>Gateway credentials remain server-side.</span><span id="mode">mode: —</span></footer>
+  <footer><span>Gateway credentials and raw tool inputs remain server-side.</span><span id="mode">mode: —</span></footer>
 </body>
 </html>
