@@ -101,8 +101,9 @@ test("rejects conflicting authentication and fingerprint settings", () => {
 });
 
 test("masks secrets and preserves, replaces, or explicitly clears them", () => {
-  const current = parseGateways([{ id: "one", name: "One", url: "wss://one.example", token: "secret" }]);
+  const current = parseGateways([{ id: "one", name: "One", url: "wss://one.example", token: "secret", tlsFingerprint: "sha256:pinned" }]);
   assert.doesNotMatch(JSON.stringify(maskGateways(current)), /secret/);
+  assert.doesNotMatch(JSON.stringify(maskGateways(current)), /fingerprint|pinned/i);
   assert.equal((maskGateways(current)[0] as { originalId: string }).originalId, "one");
   const base = { id: "one", originalId: "one", name: "One", url: "wss://one.example" };
   assert.equal(applyGatewayUpdate(current, [{ ...base, auth: { method: "token", action: "preserve" } }])[0]?.token, "secret");
@@ -111,6 +112,7 @@ test("masks secrets and preserves, replaces, or explicitly clears them", () => {
   assert.throws(() => applyGatewayUpdate(current, [{ ...base, auth: { method: "password", action: "preserve" } }]), /cannot change auth method/);
   const renamed = applyGatewayUpdate(current, [{ ...base, id: "renamed", auth: { method: "token", action: "preserve" } }]);
   assert.equal(renamed[0]?.token, "secret");
+  assert.equal(renamed[0]?.tlsFingerprint, "sha256:pinned");
   assert.equal(JSON.stringify(renamed).includes("originalId"), false);
   assert.throws(() => applyGatewayUpdate(current, [
     { ...base, id: "first", auth: { method: "token", action: "preserve" } },

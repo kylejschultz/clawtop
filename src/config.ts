@@ -89,7 +89,7 @@ export function atomicWriteJson(path: string, value: unknown): void {
 }
 
 export function maskGateways(gateways: GatewayConfig[]): unknown[] {
-  return gateways.map(({ token, password, bootstrapToken, ...gateway }) => ({ ...gateway, originalId: gateway.id, auth: token ? { method: "token", configured: true } : password ? { method: "password", configured: true } : bootstrapToken ? { method: "bootstrapToken", configured: true } : { method: "none", configured: false } }));
+  return gateways.map(({ id, name, host, url, token, password, bootstrapToken }) => ({ id, name, host, url, originalId: id, auth: token ? { method: "token", configured: true } : password ? { method: "password", configured: true } : bootstrapToken ? { method: "bootstrapToken", configured: true } : { method: "none", configured: false } }));
 }
 
 export function applyGatewayUpdate(current: GatewayConfig[], input: unknown): GatewayConfig[] {
@@ -124,7 +124,7 @@ export function applyGatewayUpdate(current: GatewayConfig[], input: unknown): Ga
       if (value) fail(`Gateway ${index + 1} clear action must not include a secret`);
       if (method !== "none") fail(`Gateway ${index + 1} clear action requires auth method none`);
     }
-    return { id: item.id, name: item.name, host: item.host, url: item.url, tlsFingerprint: item.tlsFingerprint ?? item.fingerprint, ...secret };
+    return { id: item.id, name: item.name, host: item.host, url: item.url, tlsFingerprint: previous?.tlsFingerprint, ...secret };
   });
   return parseGateways(candidate);
 }

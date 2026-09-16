@@ -44,17 +44,12 @@ button { font: inherit; }
 
 main { min-height: 0; display: grid; grid-template-columns: minmax(420px, 48%) minmax(0, 1fr); overflow: hidden; }
 .rail, .detail { min-width: 0; min-height: 0; }
-.rail { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; border-right: 1px solid var(--line); background: #081119; }
+.rail { display: grid; grid-template-rows: auto minmax(0, 1fr); border-right: 1px solid var(--line); background: #081119; }
 .tree { min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .section-head { z-index: 2; display: flex; justify-content: space-between; align-items: end; gap: 1rem; padding: .65rem .8rem; background: rgba(11,21,30,.98); border-bottom: 1px solid var(--line); color: var(--muted); }
 h1, h2, h3 { margin: 0; font-size: inherit; }
 h1, h3 { margin-top: .12rem; color: var(--text); font-size: 14px; letter-spacing: -.01em; }
 #counts { font-size: 11px; text-align: right; }
-.view-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: .65rem .8rem .35rem; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: #071017; }
-.view-switch button { min-height: 2rem; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
-.view-switch button[aria-pressed="true"] { background: var(--panel-3); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.view-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
 .gateway { margin: .55rem .65rem; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 .gateway-toggle { width: 100%; display: grid; grid-template-columns: minmax(190px, 1fr) auto; grid-template-areas: "heading since" "stats stats" "now now"; gap: .55rem .8rem; padding: .8rem; border: 0; background: linear-gradient(100deg, #0d1c26, #0a161e); color: inherit; text-align: left; cursor: pointer; }
 .gateway-toggle:hover { background: linear-gradient(100deg, #112733, #0c1c25); }
@@ -163,6 +158,22 @@ dialog legend { color: var(--accent); }
 dialog label { display: grid; gap: .25rem; color: var(--muted); }
 dialog input, dialog select { width: 100%; padding: .42rem; border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); font: inherit; }
 dialog button { padding: .42rem .65rem; }
+.inactive-settings { display: grid; gap: .5rem; }
+.setting-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .5rem 1rem; padding: .55rem .65rem; border: 1px solid var(--line); border-radius: 5px; background: rgba(7,16,23,.45); }
+.setting-row span { min-width: 0; }
+.setting-row strong, .setting-row small { display: block; }
+.setting-row strong { color: var(--text); font-size: 13px; }
+.setting-row small { margin-top: .12rem; color: var(--muted); font-size: 10px; }
+.setting-row input, .setting-row select { width: min(7rem, 35vw); }
+.gateway-form { margin: .7rem 0; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: rgba(7,16,23,.3); }
+.gateway-form > summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .35rem .65rem; align-items: baseline; padding: .7rem; color: var(--accent); cursor: pointer; list-style: none; }
+.gateway-form > summary::-webkit-details-marker { display: none; }
+.gateway-form > summary::before { content: "›"; font-size: 18px; line-height: .8; transition: transform .14s ease; }
+.gateway-form[open] > summary::before { transform: rotate(90deg); }
+.gateway-summary-name, .gateway-summary-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gateway-summary-name { font-weight: 700; }
+.gateway-summary-meta { color: var(--muted); font-size: 10px; }
+.gateway-form > fieldset { margin: 0; border: 0; border-top: 1px solid var(--line); }
 .check { display: flex; grid-template-columns: auto 1fr; align-items: center; }
 .check input { width: auto; }
 .gateway-remove { color: var(--red); margin-top: .65rem; }
@@ -199,10 +210,8 @@ dialog button { padding: .42rem .65rem; }
   main { display: block; min-height: 0; overflow: hidden; }
   main > .rail, main > .detail { width: 100%; height: 100%; border: 0; }
   main[data-mobile-pane="fleet"] > .detail, main[data-mobile-pane="session"] > .rail { display: none; }
-  .rail { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .rail { grid-template-rows: auto minmax(0, 1fr); }
   .section-head { padding: .5rem .65rem; }
-  .view-switch { margin: .45rem .65rem .25rem; }
-  .view-switch button { min-height: 2.75rem; }
   .gateway { margin: .45rem .5rem; }
   .gateway-toggle { min-height: 2.75rem; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "heading since" "stats stats" "now now"; padding: .65rem; }
   .gateway-toggle:hover, .session:hover, .event:hover { background: inherit; }
@@ -241,6 +250,10 @@ dialog button { padding: .42rem .65rem; }
   .modal-head { position: sticky; top: calc(-1 * max(.7rem, env(safe-area-inset-top))); z-index: 2; margin: calc(-1 * max(.7rem, env(safe-area-inset-top))) calc(-1 * max(.7rem, env(safe-area-inset-right))) .75rem calc(-1 * max(.7rem, env(safe-area-inset-left))); padding: max(.7rem, env(safe-area-inset-top)) max(.7rem, env(safe-area-inset-right)) .55rem max(.7rem, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); background: var(--panel); }
   .modal-actions { position: sticky; bottom: calc(-1 * max(.7rem, env(safe-area-inset-bottom))); z-index: 2; margin: .75rem calc(-1 * max(.7rem, env(safe-area-inset-right))) calc(-1 * max(.7rem, env(safe-area-inset-bottom))) calc(-1 * max(.7rem, env(safe-area-inset-left))); padding: .65rem max(.7rem, env(safe-area-inset-right)) max(.7rem, env(safe-area-inset-bottom)) max(.7rem, env(safe-area-inset-left)); border-top: 1px solid var(--line); background: var(--panel); }
   .gateway-form-head { align-items: end; }
+  .setting-row { gap: .5rem; padding: .5rem; }
+  .setting-row input, .setting-row select { width: min(6.5rem, 35vw); }
+  .gateway-form > summary { grid-template-columns: auto minmax(0, 1fr); gap: .12rem .5rem; padding: .65rem; }
+  .gateway-summary-meta { grid-column: 2; }
   .form-grid { grid-template-columns: 1fr; }
   dialog fieldset { min-width: 0; margin: .65rem 0; padding: .65rem; }
   dialog input, dialog select, dialog button { min-height: 2.75rem; }
