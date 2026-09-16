@@ -51,6 +51,21 @@ test("projects useful tool commands while redacting credential-shaped values", (
   assert.equal(safeCommand("git status --short"), "git status --short");
 });
 
+test("redacts sensitive titles and common command credential forms", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [root({ sessionId: "stable", hasActiveRun: true })], 10));
+  state = reduceDashboard(state, {
+    type: "event", gateway: alpha, at: 20, event: "agent",
+    payload: {
+      sessionKey: root().key, runId: "run", stream: "tool",
+      data: { phase: "start", name: "exec", toolCallId: "call", args: { title: "Deploy token title-secret", command: "curl -u alice:hunter2 https://bob:password@example.test; aws configure set aws_secret_access_key aws-secret" } }
+    }
+  });
+  const serialized = JSON.stringify(state);
+  for (const secret of ["title-secret", "hunter2", "password", "aws-secret"]) assert.equal(serialized.includes(secret), false);
+  assert.match(state.sessions["alpha::agent:main:root"]?.activity[0]?.detail ?? "", /Deploy token \*\*\*/u);
+  assert.equal(safeCommand("curl -H 'Authorization: Bearer header-secret' https://example.test"), "curl -H 'Authorization: ***' https://example.test");
+});
+
 test("snapshot refresh preserves event details and other Gateways", () => {
   let state = createState("live", 100);
   state = reduceDashboard(state, snapshot(alpha, [root({ sessionId: "stable-alpha", hasActiveRun: true })], 200));

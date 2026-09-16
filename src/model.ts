@@ -252,19 +252,27 @@ function mergeActivity(items: SafeActivity[], next: SafeActivity): SafeActivity[
 }
 function toolDetail(tool: string | undefined, value: Record<string, unknown>, nested: Record<string, unknown> | undefined): string | undefined {
   const args = record(value.args) ?? record(nested?.args);
-  const title = boundedText(string(nested?.title) ?? string(args?.title) ?? "", 160);
+  const title = redactSensitiveText(string(nested?.title) ?? string(args?.title), 160);
   const command = tool === "exec" ? safeCommand(string(args?.command)) : undefined;
   return [title, command].filter((item, index, all): item is string => Boolean(item && all.indexOf(item) === index)).join(" · ") || undefined;
 }
 export function safeCommand(value: string | undefined): string | undefined {
+  return redactSensitiveText(value, 320);
+}
+function redactSensitiveText(value: string | undefined, limit: number): string | undefined {
   if (!value) return undefined;
-  let text = value
-    .replace(/Bearer\s+\S+/giu, "Bearer ***")
-    .replace(/((?:token|password|passwd|secret|api[_-]?key|authorization|cookie)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s;&|]+)/giu, "$1***")
-    .replace(/(--(?:token|password|passwd|secret|api-key|authorization|cookie)(?:=|\s+))(?:"[^"]*"|'[^']*'|[^\s;&|]+)/giu, "$1***")
+  const text = value
+    .replace(/\b(https?:\/\/)([^\s:/@]+):([^\s/@]+)@/giu, "$1***:***@")
+    .replace(/((?:^|\s)(?:-u|--user)(?:=|\s+))(?:"[^"]*"|'[^']*'|[^\s;&|]+)/giu, "$1***")
+    .replace(/\bBearer\s+[^\s'";&|]+/giu, "Bearer ***")
+    .replace(/\bBasic\s+[^\s'";&|]+/giu, "Basic ***")
+    .replace(/(["'])((?:proxy-)?authorization\s*[:=]\s*)[^'"]*\1/giu, "$1$2***$1")
+    .replace(/((?:proxy-)?authorization\s*[:=]\s*)[^\s'";&|]+/giu, "$1***")
+    .replace(/(["'])(cookie\s*[:=]\s*)[^'"]*\1/giu, "$1$2***$1")
+    .replace(/(cookie\s*[:=]\s*)[^\s'";&|]+/giu, "$1***")
+    .replace(/((?:[a-z0-9_-]*(?:token|password|passwd|pwd|secret|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)[a-z0-9_-]*)\s*(?:[:=]|\s)\s*)(?:"[^"]*"|'[^']*'|[^\s;&|]+)/giu, "$1***")
     .replace(/[A-Za-z0-9+/_=-]{48,}/gu, "***");
-  text = boundedText(text, 320) ?? "";
-  return text || undefined;
+  return boundedText(text, limit);
 }
 function activityFromRow(row: SessionWire): ActivityState {
   if (row.hasActiveRun === true || (row.activeRunIds?.length ?? 0) > 0 || row.status === "running" || row.status === "queued") return "active";
