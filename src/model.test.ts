@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createState, reduceDashboard, safeCommand, type GatewayRef, type SessionWire } from "./model.js";
 
-const alpha: GatewayRef = { id: "alpha", name: "Alpha" };
+const alpha: GatewayRef = { id: "alpha", name: "Alpha", host: "Host Alpha" };
 const beta: GatewayRef = { id: "beta", name: "Beta" };
 const root = (overrides: Partial<SessionWire> = {}): SessionWire => ({ key: "agent:main:root", kind: "direct", agentId: "main", displayName: "Root", ...overrides });
 const snapshot = (gateway: GatewayRef, sessions: SessionWire[], at: number) => ({ type: "snapshot" as const, gateway, at, agents: [], sessions });
@@ -12,6 +12,7 @@ test("snapshots namespace colliding agent and session ids by Gateway", () => {
   state = reduceDashboard(state, snapshot(alpha, [root({ sessionId: "same", hasActiveRun: true })], 200));
   state = reduceDashboard(state, snapshot(beta, [root({ sessionId: "same", hasActiveRun: false })], 210));
   assert.equal(Object.keys(state.sessions).length, 2);
+  assert.equal(state.gateways.alpha?.host, "Host Alpha");
   assert.equal(state.sessions["alpha::agent:main:root"]?.gatewayId, "alpha");
   assert.equal(state.sessions["alpha::agent:main:root"]?.sourceKey, "agent:main:root");
   assert.equal(state.sessions["alpha::agent:main:root"]?.sessionId, "alpha::same");

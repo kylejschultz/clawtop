@@ -10,13 +10,13 @@ test("loads a multi-Gateway JSON list without exposing it to client config", () 
     CLAWTOP_MODE: "live",
     CLAWTOP_HTTP_PASSWORD: "dashboard-secret",
     CLAWTOP_GATEWAYS: JSON.stringify([
-      { id: "scruffy", name: "Scruffy", url: "ws://127.0.0.1:18789", token: "one" },
-      { id: "morrow", name: "Morrow / Lantern", url: "wss://lantern.example.ts.net", password: "two", fingerprint: "sha256:two" }
+      { id: "scruffy", name: "Scruffy", host: "Unraid", url: "ws://127.0.0.1:18789", token: "one" },
+      { id: "morrow", name: "Morrow", host: "Lantern", url: "wss://lantern.example.ts.net", password: "two", fingerprint: "sha256:two" }
     ])
   });
-  assert.deepEqual(config.gateways.map(({ id, name }) => ({ id, name })), [
-    { id: "scruffy", name: "Scruffy" },
-    { id: "morrow", name: "Morrow / Lantern" }
+  assert.deepEqual(config.gateways.map(({ id, name, host }) => ({ id, name, host })), [
+    { id: "scruffy", name: "Scruffy", host: "Unraid" },
+    { id: "morrow", name: "Morrow", host: "Lantern" }
   ]);
   assert.equal(config.gateways[0]?.token, "one");
   assert.equal(config.gateways[1]?.tlsFingerprint, "sha256:two");

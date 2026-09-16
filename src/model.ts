@@ -2,7 +2,7 @@ import type { AgentEvent, AgentSummary, GatewayAgentRuntime, ProgressCard, Sessi
 
 export type ActivityState = "active" | "idle" | "unknown";
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "error";
-export type GatewayRef = { id: string; name: string };
+export type GatewayRef = { id: string; name: string; host?: string };
 
 export type SafeActivity = {
   id: string;

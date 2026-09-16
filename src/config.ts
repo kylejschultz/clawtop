@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 export type GatewayConfig = {
   id: string;
   name: string;
+  host?: string;
   url: string;
   token?: string;
   password?: string;
@@ -87,6 +88,7 @@ function parseGateway(value: unknown, index: number): GatewayConfig {
   if (!item) fail(`Gateway ${index + 1} must be an object`);
   const id = requiredString(item.id, `Gateway ${index + 1} id`);
   const name = requiredString(item.name, `Gateway ${index + 1} name`);
+  const host = optionalString(item.host);
   const url = requiredString(item.url, `Gateway ${name} url`);
   let parsed: URL;
   try { parsed = new URL(url); }
@@ -105,6 +107,7 @@ function parseGateway(value: unknown, index: number): GatewayConfig {
   return compact({
     id,
     name,
+    host,
     url,
     token,
     password,

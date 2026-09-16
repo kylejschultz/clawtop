@@ -77,7 +77,7 @@ class LiveAdapter implements ActivityAdapter {
 
   constructor(config: GatewayConfig, dataDir: string, dispatch: Dispatch) {
     const { identity, hostDeps } = createIdentityHost(join(dataDir, "gateways", config.id));
-    this.gateway = { id: config.id, name: config.name };
+    this.gateway = { id: config.id, name: config.name, host: config.host };
     this.dispatch = dispatch;
     this.secrets = [config.token, config.password, config.bootstrapToken].filter((value): value is string => Boolean(value));
     this.client = new GatewayClient({
