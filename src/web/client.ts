@@ -498,10 +498,12 @@ get("view-history").addEventListener("click", () => setView("history"));
 get("mobile-fleet").addEventListener("click", () => setMobilePane("fleet", true));
 get("mobile-session").addEventListener("click", () => setMobilePane("session", true));
 document.querySelector(".skip")?.addEventListener("click", (event) => {
-  if (!mobileQuery.matches || !selectedSession()) return;
+  if (!mobileQuery.matches) return;
   event.preventDefault();
-  setMobilePane("session", true);
+  reconcileMobileBreakpoint();
+  setMobilePane(mobilePane, true);
 });
+mobileQuery.addEventListener("change", reconcileMobileBreakpoint);
 tree.addEventListener("scroll", () => {
   if (!nearEnd(tree)) historyBoundaryConsumed = false;
   else if (viewMode === "history" && !historyBoundaryConsumed) { historyBoundaryConsumed = true; void loadOlderSessions(); }
@@ -574,13 +576,33 @@ function syncMobileNavigation(): void {
   }
   session.disabled = !available;
   session.setAttribute("aria-label", available ? "Show selected session" : "Session unavailable; select a session from Fleet");
+  if (!mobileQuery.matches) return;
+  const hiddenPane = get(mobilePane === "fleet" ? "detail" : "fleet");
+  if (document.activeElement instanceof HTMLElement && hiddenPane.contains(document.activeElement)) {
+    window.requestAnimationFrame(() => {
+      if (!mobileQuery.matches) return;
+      const hidden = get(mobilePane === "fleet" ? "detail" : "fleet");
+      if (document.activeElement instanceof HTMLElement && hidden.contains(document.activeElement)) get(mobilePane === "fleet" ? "fleet" : "detail").focus({ preventScroll: true });
+    });
+  }
+}
+function reconcileMobileBreakpoint(): void {
+  if (!mobileQuery.matches) return;
+  const active = document.activeElement;
+  const fleet = get("fleet");
+  const detail = get("detail");
+  const available = Boolean(selectedSession());
+  if (fleet.contains(active)) mobilePane = "fleet";
+  else if (available && detail.contains(active)) mobilePane = "session";
+  else if (mobilePane === "session" && !available) mobilePane = "fleet";
+  syncMobileNavigation();
 }
 function setMobilePane(next: MobilePane, moveFocus: boolean): void {
   if (next === "session" && !selectedSession()) return;
   mobilePane = next;
   syncMobileNavigation();
   if (!moveFocus || !mobileQuery.matches) return;
-  window.requestAnimationFrame(() => get(next === "fleet" ? "fleet" : "detail").focus({ preventScroll: true }));
+  window.requestAnimationFrame(() => { if (mobileQuery.matches) get(next === "fleet" ? "fleet" : "detail").focus({ preventScroll: true }); });
 }
 function setView(next: "live" | "history"): void {
   if (viewMode === next) return;
