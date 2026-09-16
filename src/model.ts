@@ -210,22 +210,26 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
 
   const activity = normalizeActivity(event, value, nested, sessionKey, at);
   let nextState = current.state;
+  let nextStatus = current.status;
   if (event === "sessions.changed") {
     const status = string(value.status)?.trim().toLowerCase();
+    nextStatus = status ?? current.status;
     if (isTerminalStatus(status)) nextState = "idle";
     else if (status === "running" || status === "queued") nextState = "active";
     else if (typeof value.hasActiveRun === "boolean") nextState = value.hasActiveRun ? "active" : "idle";
     else if (Array.isArray(value.activeRunIds)) nextState = value.activeRunIds.length ? "active" : "idle";
   } else if (event === "agent") {
     const stream = string(value.stream);
-    const dataType = string(nested?.type);
-    if (stream === "lifecycle" && (dataType === "end" || dataType === "error")) nextState = "idle";
-    else nextState = "active";
+    const phase = string(nested?.type) ?? string(nested?.phase);
+    const commandPhase = string(nested?.phase) ?? string(nested?.status);
+    if (stream === "lifecycle" && (phase === "end" || phase === "error")) nextState = "idle";
+    else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) nextState = "active";
   }
 
   const next: DashboardSession = compact({
     ...current,
     state: nextState,
+    status: nextStatus,
     activeSince: nextState === "active" ? current.activeSince ?? at : undefined,
     lastSignalAt: at,
     activity: activity ? mergeActivity(current.activity, activity) : current.activity

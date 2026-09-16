@@ -13,6 +13,9 @@ type State = { mode: "demo" | "live"; gateways: Record<string, Gateway>; agents:
 
 let state: State | undefined;
 let selected = "";
+let focusedSession: Session | undefined;
+let liveSelected = "";
+let historySelected = "";
 let browserConnected = false;
 let renderedWorkNotes = new Map<string, WorkNote | undefined>();
 let noteRefreshTimer: number | undefined;
@@ -29,7 +32,12 @@ const source = new EventSource("/api/events");
 source.addEventListener("state", (event) => {
   state = JSON.parse((event as MessageEvent<string>).data) as State;
   browserConnected = true;
-  if (!selected || (viewMode === "live" ? !state.sessions[selected] : !historicalSessions.has(selected))) selected = viewMode === "live" ? initialSelection(state) : sortSessions([...historicalSessions.values()])[0]?.key ?? "";
+  if (!selected) {
+    selected = viewMode === "live" ? initialSelection(state) : sortSessions([...historicalSessions.values()])[0]?.key ?? "";
+    if (viewMode === "live") liveSelected = selected;
+    else historySelected = selected;
+  }
+  if (viewMode === "live" && state.sessions[selected]) focusedSession = state.sessions[selected];
   render();
 });
 source.onopen = () => { browserConnected = true; renderConnection(); };
@@ -68,10 +76,10 @@ function render(): void {
     sessions.filter((session) => session.gatewayId === gateway.id)
   )));
   renderDetail();
-  queueMicrotask(() => { if (viewMode === "history" && nearEnd(tree)) void loadOlderSessions(); });
 }
 
 function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): HTMLElement {
+  if (viewMode === "history") agents = agents.filter((agent) => sessions.some((session) => session.agentId === agent.id));
   const expanded = expandedGateways.has(gateway.id);
   const section = element("section", `gateway${expanded ? " expanded" : " collapsed"}`);
   const toggle = document.createElement("button");
@@ -86,27 +94,28 @@ function renderGateway(gateway: Gateway, agents: Agent[], sessions: Session[]): 
   });
 
   const active = sessions.filter((session) => session.state === "active").length;
-  const activeFocus = sortSessions(sessions.filter((session) => session.state === "active"))[0];
+  const activeFocus = active === 1 ? sessions.find((session) => session.state === "active") : undefined;
   const focus = activeFocus ?? sortSessions(sessions).find((session) => Boolean(workNoteCandidate(session)));
   const note = focus ? workNote(focus) : undefined;
-  const focusText = note?.text ?? focus?.title ?? "No recent work";
+  const focusText = active > 1 ? `${active} sessions working` : note?.text ?? focus?.title ?? "No recent work";
   const emoji = agents.find((agent) => agent.sourceId === "main")?.emoji ?? agents.find((agent) => agent.emoji)?.emoji;
   const heading = element("span", "gateway-heading");
   heading.append(text("", `gateway-caret${expanded ? " open" : ""}`));
   if (emoji) heading.append(text(emoji, "gateway-emoji"));
   heading.append(text(gateway.name, "gateway-name"));
   if (gateway.host) heading.append(text(gateway.host, "gateway-host"));
-  heading.append(text(gateway.connection.state, "gateway-state"));
+  heading.append(text(viewMode === "history" ? "history" : gateway.connection.state, "gateway-state"));
   const version = gateway.connection.serverVersion ? `v${gateway.connection.serverVersion}` : "version unknown";
   heading.append(text(version, "gateway-version"));
 
   const stats = element("span", "gateway-stats");
-  stats.append(metric(`${active}`, "active"), metric(`${agents.length}`, "agents"));
+  if (viewMode === "history") stats.append(metric(`${sessions.length}`, "archived"), metric(`${agents.length}`, "agents"));
+  else stats.append(metric(`${active}`, "active"), metric(`${agents.length}`, "agents"));
 
   const now = element("span", `gateway-now${activeFocus ? " live" : ""}`);
   now.append(text(activeFocus ? "now" : note ? "last" : "status", "gateway-now-label"), text(focusText, "gateway-now-text"));
-  const since = text(`${gateway.connection.state} ${relative(gateway.connection.since)}`, "gateway-since");
-  since.dataset.gateway = gateway.id;
+  const since = text(viewMode === "history" ? "archived records" : `${gateway.connection.state} ${relative(gateway.connection.since)}`, "gateway-since");
+  if (viewMode === "live") since.dataset.gateway = gateway.id;
   toggle.append(heading, stats, now, since);
 
   const body = element("div", "gateway-body");
@@ -128,8 +137,13 @@ function renderAgent(agent: Agent, sessions: Session[]): HTMLElement {
   const title = element("div", "agent-title");
   title.append(text(`${agent.emoji ?? "◇"} ${agent.name}`));
   if (agent.agentRuntime) title.append(text(agent.agentRuntime.id, "agent-runtime"));
-  title.append(text(`${sessions.filter((session) => session.state === "active").length} active · ${sessions.length} total`, "agent-count"));
+  title.append(text(viewMode === "history" ? `${sessions.length} archived` : `${sessions.filter((session) => session.state === "active").length} active · ${sessions.length} total`, "agent-count"));
   section.append(title);
+  if (viewMode === "history") {
+    const seen = new Set<string>();
+    for (const session of sortSessions(sessions)) appendSession(section, { ...session, parentSessionKey: undefined, childSessions: [] }, new Map(), seen, 0);
+    return section;
+  }
   const byKey = new Map(sessions.map((session) => [session.key, session]));
   const explicitChildren = new Set(sessions.map((session) => session.parentSessionKey).filter((key): key is string => Boolean(key && byKey.has(key))));
   const referenced = new Set(sessions.flatMap((session) => session.childSessions).filter((key) => byKey.has(key)));
@@ -166,7 +180,14 @@ function appendSession(parent: HTMLElement, session: Session, byKey: Map<string,
   button.className = `session${selected === session.key ? " selected" : ""}`;
   button.setAttribute("aria-pressed", String(selected === session.key));
   button.dataset.key = session.key;
-  button.addEventListener("click", () => { selected = session.key; render(); });
+  button.addEventListener("click", () => {
+    selected = session.key;
+    if (viewMode === "live") { liveSelected = selected; focusedSession = session; }
+    else historySelected = selected;
+    eventBoundaryConsumed = false;
+    get("events").scrollTop = 0;
+    render();
+  });
   button.append(text("", `dot ${session.state}`));
   const label = element("span", "session-title");
   const note = workNote(session);
@@ -197,7 +218,7 @@ function renderConnection(): void {
 }
 
 function renderDetail(): void {
-  const session = viewMode === "live" ? state?.sessions[selected] : historicalSessions.get(selected);
+  const session = viewMode === "live" ? state?.sessions[selected] ?? focusedSession : historicalSessions.get(selected);
   empty.hidden = Boolean(session);
   detailContent.hidden = !session;
   if (!session) return;
@@ -247,7 +268,6 @@ function renderActivity(items: Activity[]): void {
   get("activity-summary").textContent = items.length ? `${items.length} signals · ${tools} tool action${tools === 1 ? "" : "s"}` : "waiting for activity";
   const events = get("events");
   events.replaceChildren(...(items.length ? activityRows(items).map(renderEvent) : [text("No sanitized live activity received in this process.", "empty-row", "li")]));
-  queueMicrotask(() => { if (nearEnd(events)) void loadOlderEvents(); });
 }
 
 function activityRows(items: Activity[]): ActivityView[] {
@@ -256,12 +276,12 @@ function activityRows(items: Activity[]): ActivityView[] {
   const lifecycle = new Set(["start", "finishing", "end"]);
   for (let index = 0; index < items.length; index += 1) {
     let item = items[index]!;
-    if (item.kind === "agent" && lifecycle.has(item.label)) {
+    if (item.kind === "agent" && lifecycle.has(item.label) && item.runId) {
       const phases = [item];
       while (items[index + 1]?.kind === "agent" && lifecycle.has(items[index + 1]!.label) && items[index + 1]!.runId === item.runId) phases.push(items[++index]!);
       item = phases.find((phase) => phase.label === "end") ?? phases.find((phase) => phase.label === "finishing") ?? item;
     }
-    const canGroup = !item.detail && (item.kind === "agent" || item.kind === "session");
+    const canGroup = !item.detail && (item.kind === "agent" || item.kind === "session") && !(item.kind === "agent" && lifecycle.has(item.label) && !item.runId);
     const key = canGroup ? `${item.runId ?? ""}:${item.kind}:${item.label}:${item.status ?? ""}` : "";
     const current = key ? repeated.get(key) : undefined;
     if (current) {
@@ -390,7 +410,7 @@ function scheduleNoteRefresh(at: number): void {
 }
 
 function renderTimes(): void {
-  const session = viewMode === "live" ? state?.sessions[selected] : historicalSessions.get(selected);
+  const session = viewMode === "live" ? state?.sessions[selected] ?? focusedSession : historicalSessions.get(selected);
   if (session) get("elapsed").textContent = session.state === "active" && session.activeSince ? `elapsed ${duration(Date.now() - session.activeSince)}` : `last ${relative(session.lastSignalAt ?? session.updatedAt)}`;
   document.querySelectorAll<HTMLElement>(".session[data-key]").forEach((node) => {
     const item = state?.sessions[node.dataset.key ?? ""] ?? historicalSessions.get(node.dataset.key ?? "");
@@ -410,7 +430,9 @@ function renderTimes(): void {
 function initialSelection(value: State): string { return sortSessions(Object.values(value.sessions))[0]?.key ?? ""; }
 function sortSessions(items: Session[]): Session[] {
   const rank: Record<ActivityState, number> = { active: 0, unknown: 1, idle: 2 };
-  return [...items].sort((a, b) => rank[a.state] - rank[b.state] || (b.lastSignalAt ?? b.updatedAt ?? 0) - (a.lastSignalAt ?? a.updatedAt ?? 0) || a.title.localeCompare(b.title));
+  return [...items].sort((a, b) => rank[a.state] - rank[b.state]
+    || (a.state === "active" && b.state === "active" ? (a.activeSince ?? a.lifecycleSince) - (b.activeSince ?? b.lifecycleSince) : (b.lastSignalAt ?? b.updatedAt ?? 0) - (a.lastSignalAt ?? a.updatedAt ?? 0))
+    || a.title.localeCompare(b.title) || a.key.localeCompare(b.key));
 }
 function relative(at?: number): string {
   if (!at) return "never";
@@ -450,11 +472,14 @@ type BrowserGatewaySetting = { id: string; originalId: string; name: string; hos
 type BrowserSettings = { settings: { inactiveSessionLimit: number; inactiveAgeDays: number | "all" }; gateways: BrowserGatewaySetting[]; configError?: string };
 const historicalSessions = new Map<string, Session>();
 const loadedEvents = new Map<string, Activity[]>();
-let historyBefore: number | undefined;
+let historyCursor: string | undefined;
 let historyLoading = false;
 let historyEnded = false;
 const eventLoading = new Set<string>();
 const eventEnded = new Set<string>();
+const eventCursors = new Map<string, string>();
+let historyBoundaryConsumed = false;
+let eventBoundaryConsumed = false;
 const settingsDialog = get("settings-dialog") as HTMLDialogElement;
 get("settings-open").addEventListener("click", () => { void openSettings(); });
 get("settings-close").addEventListener("click", () => settingsDialog.close());
@@ -462,8 +487,15 @@ get("settings-cancel").addEventListener("click", () => settingsDialog.close());
 get("gateway-add").addEventListener("click", () => appendGatewayForm());
 get("view-live").addEventListener("click", () => setView("live"));
 get("view-history").addEventListener("click", () => setView("history"));
-tree.addEventListener("scroll", () => { if (viewMode === "history" && nearEnd(tree)) void loadOlderSessions(); });
-get("events").addEventListener("scroll", () => { if (nearEnd(get("events"))) void loadOlderEvents(); });
+tree.addEventListener("scroll", () => {
+  if (!nearEnd(tree)) historyBoundaryConsumed = false;
+  else if (viewMode === "history" && !historyBoundaryConsumed) { historyBoundaryConsumed = true; void loadOlderSessions(); }
+});
+get("events").addEventListener("scroll", () => {
+  const events = get("events");
+  if (!nearEnd(events)) eventBoundaryConsumed = false;
+  else if (!eventBoundaryConsumed) { eventBoundaryConsumed = true; void loadOlderEvents(); }
+});
 get("settings-form").addEventListener("submit", (event) => { event.preventDefault(); void saveSettings(); });
 
 async function openSettings(): Promise<void> {
@@ -509,8 +541,15 @@ async function saveSettings(): Promise<void> {
 function showSettingsError(message?: string): void { const node = get("settings-error"); node.hidden = !message; node.textContent = message ?? ""; }
 function setView(next: "live" | "history"): void {
   if (viewMode === next) return;
+  if (viewMode === "live") liveSelected = selected;
+  else historySelected = selected;
   viewMode = next;
-  selected = next === "live" && state ? initialSelection(state) : sortSessions([...historicalSessions.values()])[0]?.key ?? "";
+  historyBoundaryConsumed = false;
+  eventBoundaryConsumed = false;
+  tree.scrollTop = 0;
+  get("events").scrollTop = 0;
+  selected = next === "live" ? liveSelected || (state ? initialSelection(state) : "") : historySelected || (sortSessions([...historicalSessions.values()])[0]?.key ?? "");
+  if (next === "live" && state?.sessions[selected]) focusedSession = state.sessions[selected];
   if (next === "history" && !historicalSessions.size && !historyEnded) void loadOlderSessions();
   render();
 }
@@ -521,15 +560,15 @@ async function loadOlderSessions(): Promise<void> {
   historyLoading = true;
   showPageState("history-state", "Loading history…");
   const query = new URLSearchParams({ limit: "25" });
-  if (historyBefore) query.set("before", String(historyBefore));
+  if (historyCursor) query.set("cursor", historyCursor);
   try {
     const response = await fetch(`/api/history/sessions?${query}`);
     if (!response.ok) return showPageState("history-state", "History could not be loaded.");
-    const page = await response.json() as { sessions: Session[]; nextBefore?: number };
+    const page = await response.json() as { sessions: Session[]; nextCursor?: string };
     for (const session of page.sessions) historicalSessions.set(session.key, { ...session, state: "idle", activeSince: undefined });
-    historyBefore = page.nextBefore;
-    historyEnded = !page.nextBefore;
-    if (!selected && page.sessions[0]) selected = page.sessions[0].key;
+    historyCursor = page.nextCursor;
+    historyEnded = !page.nextCursor;
+    if (!selected && page.sessions[0]) { selected = page.sessions[0].key; historySelected = selected; }
     showPageState("history-state", historyEnded ? "End of history" : undefined);
     render();
   } catch { showPageState("history-state", "History could not be loaded."); }
@@ -537,21 +576,30 @@ async function loadOlderSessions(): Promise<void> {
 }
 
 async function loadOlderEvents(): Promise<void> {
-  const session = viewMode === "live" ? state?.sessions[selected] : historicalSessions.get(selected);
+  const session = viewMode === "live" ? state?.sessions[selected] ?? focusedSession : historicalSessions.get(selected);
   if (!session || eventLoading.has(session.key) || eventEnded.has(session.key)) return;
   eventLoading.add(session.key);
   showPageState("event-page-state", "Loading earlier activity…");
-  const existing = [...session.activity, ...(loadedEvents.get(session.key) ?? [])];
-  const before = existing.length ? Math.min(...existing.map((item) => item.at)) : Number.MAX_SAFE_INTEGER;
-  const query = new URLSearchParams({ historyId: session.historyId ?? session.key, before: String(before), limit: "40" });
+  const query = new URLSearchParams({ historyId: session.historyId ?? session.key, limit: "40" });
+  const cursor = eventCursors.get(session.key) ?? cursorAfter(session.activity);
+  if (cursor) query.set("cursor", cursor);
   try {
     const response = await fetch(`/api/history/events?${query}`);
     if (!response.ok) return showPageState("event-page-state", "Earlier activity could not be loaded.");
-    const page = await response.json() as { events: Activity[]; nextBefore?: number };
+    const page = await response.json() as { events: Activity[]; nextCursor?: string };
     loadedEvents.set(session.key, [...(loadedEvents.get(session.key) ?? []), ...page.events]);
-    if (!page.nextBefore) eventEnded.add(session.key);
-    showPageState("event-page-state", page.nextBefore ? undefined : "Start of recorded activity");
+    if (page.nextCursor) eventCursors.set(session.key, page.nextCursor);
+    else eventEnded.add(session.key);
+    showPageState("event-page-state", page.nextCursor ? undefined : "Start of recorded activity");
     renderDetail();
   } catch { showPageState("event-page-state", "Earlier activity could not be loaded."); }
   finally { eventLoading.delete(session.key); }
+}
+function cursorAfter(events: Activity[]): string | undefined {
+  const last = [...events].sort((a, b) => b.at - a.at || a.id.localeCompare(b.id)).at(-1);
+  if (!last) return undefined;
+  const bytes = new TextEncoder().encode(JSON.stringify([last.at, last.id]));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }

@@ -167,6 +167,18 @@ test("terminal sessions.changed status overrides a stale active event flag", () 
   state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 20, payload: { sessionKey: root().key, status: "completed", hasActiveRun: true, activeRunIds: ["stale"] } });
   assert.equal(state.sessions["alpha::agent:main:root"]?.state, "idle");
   assert.equal(state.gateways.alpha?.activeSessions, 0);
+  assert.equal(state.sessions["alpha::agent:main:root"]?.status, "completed");
+});
+
+test("trailing usage and unrecognized agent events do not reactivate a completed session", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [root()], 10));
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 20, payload: { sessionKey: root().key, runId: "r", stream: "lifecycle", data: { type: "start" } } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "active");
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 30, payload: { sessionKey: root().key, runId: "r", stream: "lifecycle", data: { type: "end" } } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 40, payload: { sessionKey: root().key, runId: "r", stream: "usage", data: { type: "usage" } } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 50, payload: { sessionKey: root().key, runId: "r", stream: "mystery", data: { type: "unknown" } } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "idle");
+  assert.equal(state.gateways.alpha?.activeSessions, 0);
 });
 
 test("events and connection failures remain isolated to their Gateway", () => {

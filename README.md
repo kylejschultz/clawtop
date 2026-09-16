@@ -12,6 +12,7 @@ A small, self-hosted, **read-only** observability workspace for live OpenClaw fl
 - Verified runtime and placement facts when projected by the Gateway: agent runtime/harness, model provider, placement state/provider/profile, machine class/OS label, and paired-device runner availability
 - Active elapsed time, last-signal age, stable normalized work notes, sanitized progress-card summaries, and safe recent signals
 - Separate live and lazily paged durable-history views, with automatic workstream pagination
+- A deliberately flat History list because sanitized generations cannot safely reconstruct live parent/child links
 - Explicit session names with visibility-scoped, first-message-derived titles as a fallback when the Gateway supports them
 - Demo data for two Gateways with no OpenClaw configuration
 
