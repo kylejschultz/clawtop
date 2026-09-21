@@ -14,7 +14,6 @@
   <div class="page-grid" aria-hidden="true"></div>
   <header class="masthead">
     <a class="wordmark" href="#top"><span class="mark">⌁</span> clawtop</a>
-    <span class="header-note">OpenClaw fleet observer</span>
     <nav aria-label="Primary navigation"><a href="#view">The view</a><a href="#boundary">Boundary</a><a href="#run">Run it</a><a href="https://github.com/kylejschultz/clawtop">GitHub ↗</a></nav>
   </header>
   <main id="top">
@@ -28,20 +27,20 @@
       <div class="specimen" id="view" aria-label="Clawtop fleet interface preview">
         <div class="specimen-bar"><span>clawtop / live fleet</span><span class="specimen-state"><i></i> 3 gateways connected</span></div>
         <div class="specimen-columns"><span>Gateway</span><span>Current activity</span><span>Age</span></div>
-        <div class="fleet-entry selected"><span class="entry-name"><b class="state teal"></b><strong>Morrow</strong><small>Lantern</small></span><span class="activity"><b>Clawtop Website Build</b><small>inspecting a new visual pass</small></span><time>now</time></div>
-        <div class="fleet-entry"><span class="entry-name"><b class="state lime"></b><strong>Scruffy</strong><small>Unraid</small></span><span class="activity"><b>Media normalization</b><small>waiting on a library scan</small></span><time>02m</time></div>
-        <div class="fleet-entry"><span class="entry-name"><b class="state violet"></b><strong>Zoidberg</strong><small>Mac Mini</small></span><span class="activity"><b>Release preparation</b><small>three child runs in progress</small></span><time>07m</time></div>
+        <div class="fleet-entry selected"><span class="entry-name"><b class="state teal"></b><strong>gateway-a</strong><small>host-a</small></span><span class="activity"><b>Primary session</b><small>inspecting a new visual pass</small></span><time>now</time></div>
+        <div class="fleet-entry"><span class="entry-name"><b class="state lime"></b><strong>gateway-b</strong><small>host-b</small></span><span class="activity"><b>Background task</b><small>waiting on a library scan</small></span><time>02m</time></div>
+        <div class="fleet-entry"><span class="entry-name"><b class="state violet"></b><strong>gateway-c</strong><small>host-c</small></span><span class="activity"><b>Parent session</b><small>three child tasks in progress</small></span><time>07m</time></div>
         <div class="specimen-foot"><span>active sessions <b>18</b></span><span>agents <b>06</b></span><span>child runs <b>08</b></span><span class="foot-mark">↳ select a session to follow its line</span></div>
       </div>
     </section>
     <div class="signal-strip"><div class="shell signal-inner"><span>Multiple Gateways</span><i>→</i><span>one field view</span><i>·</i><span>no control plane</span><i>·</i><span>no guessing</span></div></div>
     <section class="section shell see-section">
-      <div class="section-label">What stays visible</div>
-      <div class="see-content"><h2>Follow the work<br>without chasing it.</h2><p>Clawtop turns scattered activity into a stable view. Keep the Gateway boundary. Keep the parent/child shape. Read the signal that matters now.</p><div class="readout-list"><div><span>01</span><strong>Fleet state</strong><small>Which Gateways are connected, and where they live.</small></div><div><span>02</span><strong>Session lineage</strong><small>How a parent run breaks into independent child work.</small></div><div><span>03</span><strong>Current signal</strong><small>What is active, what changed, and how long ago.</small></div></div></div>
+      <div class="section-heading"><span>01</span><h2>What stays visible</h2></div>
+      <div class="see-content"><h3>Follow the work<br>without chasing it.</h3><p>Clawtop turns scattered activity into a stable view. Keep the Gateway boundary. Keep the parent/child shape. Read the signal that matters now.</p><div class="readout-list"><div><span>Fleet state</span><strong>Connected Gateways</strong><small>Which Gateways are connected, and where they live.</small></div><div><span>Session lineage</span><strong>Parent and child work</strong><small>How a parent run breaks into independent child work.</small></div><div><span>Current signal</span><strong>What changed</strong><small>What is active, what changed, and how long ago.</small></div></div></div>
     </section>
     <section class="section shell boundary-section" id="boundary">
-      <div class="section-label">The boundary</div>
-      <div class="boundary-content"><div class="boundary-heading"><span class="boundary-glyph">—</span><h2>It sees the room.<br>It stays out of the machinery.</h2></div><p>Clawtop connects to OpenClaw Gateways with read-only access. It does not SSH to hosts, attach to harnesses, request work, or quietly turn observation into control.</p><div class="boundary-lines"><span><b>reads</b> Gateway projections</span><span><b>keeps</b> credentials server-side</span><span><b>omits</b> prompts and raw payloads</span></div></div>
+      <div class="section-heading"><span>02</span><h2>The boundary</h2></div>
+      <div class="boundary-content"><div class="boundary-heading"><span class="boundary-glyph">—</span><h3>It sees the room.<br>It stays out of the machinery.</h3></div><p>Clawtop connects to OpenClaw Gateways with read-only access. It does not SSH to hosts, attach to harnesses, request work, or quietly turn observation into control.</p><div class="boundary-lines"><span><b>reads</b> Gateway projections</span><span><b>keeps</b> credentials server-side</span><span><b>omits</b> prompts and raw payloads</span></div></div>
     </section>
     <section class="run-section shell" id="run">
       <div class="run-copy"><p class="kicker">Bring your own surface</p><h2>Put the view<br>near the work.</h2><p>Self-host Clawtop anywhere your fleet already has a trusted boundary. Start in demo mode, then connect one or more Gateways.</p><a class="plain-link" href="https://github.com/kylejschultz/clawtop">Read the repository <span>↗</span></a></div>
