@@ -57,8 +57,14 @@ export class HistoryStore {
   restore(session: DashboardSession, limit = 40): DashboardSession {
     if (!session.sessionId) return session;
     const historyId = eventKey(session);
-    const activity = this.activityRows(historyId, session.key, limit);
-    return { ...session, historyId, activity: activity.length ? merge(session.activity, activity).slice(0, limit) : session.activity };
+    const page = this.activityPage(historyId, limit);
+    return {
+      ...session,
+      historyId,
+      activityCursor: page.nextCursor,
+      activityHistoryComplete: !page.nextCursor,
+      activity: page.events.length ? merge(session.activity, page.events).slice(0, limit) : session.activity
+    };
   }
 
   page(cursor: string | undefined = undefined, limit = 25): HistoryPage {
@@ -70,7 +76,8 @@ export class HistoryStore {
     const sessions = selected.flatMap((row) => {
       try {
         const stored = JSON.parse(row.metadata) as StoredSession;
-        return [{ ...stored, key: row.history_id, historyId: row.history_id, title: "Historical session", state: "idle" as const, activeSince: undefined, activity: this.activityRows(row.history_id, row.history_id, 40) }];
+        const page = this.activityPage(row.history_id, 40);
+        return [{ ...stored, key: row.history_id, historyId: row.history_id, title: "Historical session", state: "idle" as const, activeSince: undefined, activityCursor: page.nextCursor, activityHistoryComplete: !page.nextCursor, activity: page.events.map((event) => ({ ...event, sessionKey: row.history_id })) }];
       } catch { return []; }
     });
     const last = selected.at(-1);
@@ -90,11 +97,6 @@ export class HistoryStore {
     const events = selected.map((item) => activityRow(item, row.live_key));
     const last = selected.at(-1);
     return { events, nextCursor: more && last ? encodeCursor(last.at, last.id) : undefined };
-  }
-
-  private activityRows(historyId: string, sessionKey: string, limit: number, before = Number.MAX_SAFE_INTEGER): SafeActivity[] {
-    const rows = this.db.prepare("SELECT id,at,kind,label,status,run_id FROM events WHERE history_id=? AND at<? ORDER BY at DESC,id ASC LIMIT ?").all(historyId, before, Math.max(1, Math.min(100, Math.trunc(limit)))) as Array<{ id: string; at: number; kind: SafeActivity["kind"]; label: string; status: string | null; run_id: string | null }>;
-    return rows.map((row) => activityRow(row, sessionKey));
   }
 
   prune(now = Date.now()): void {
@@ -129,8 +131,9 @@ function storedSession(session: DashboardSession): StoredSession {
 function merge(current: SafeActivity[], stored: SafeActivity[]): SafeActivity[] {
   const values = new Map(stored.map((item) => [item.id, item]));
   for (const item of current) values.set(item.id, item);
-  return [...values.values()].sort((a, b) => b.at - a.at);
+  return [...values.values()].sort((a, b) => b.at - a.at || compareIds(a.id, b.id));
 }
+function compareIds(left: string, right: string): number { return left < right ? -1 : left > right ? 1 : 0; }
 function activityRow(row: { id: string; at: number; kind: SafeActivity["kind"]; label: string; status: string | null; run_id: string | null }, sessionKey: string): SafeActivity {
   return compact({ id: row.id, sessionKey, at: row.at, kind: row.kind, label: row.label, status: row.status ?? undefined, runId: row.run_id ?? undefined });
 }

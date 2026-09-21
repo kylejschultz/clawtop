@@ -9,12 +9,12 @@ export class DashboardStore {
   dispatch = (action: DashboardAction): void => {
     const previous = this.value;
     this.value = reduceDashboard(this.value, action);
-    if (action.type === "snapshot" && this.history) {
+    if (this.history) {
+      this.history.persist(previous, this.value);
       const sessions = { ...this.value.sessions };
-      for (const [key, session] of Object.entries(sessions)) if (session.gatewayId === action.gateway.id) sessions[key] = this.history.restore(session);
+      for (const [key, session] of Object.entries(sessions)) if (previous.sessions[key] !== session) sessions[key] = this.history.restore(session);
       this.value = { ...this.value, sessions };
     }
-    this.history?.persist(previous, this.value);
     for (const listener of this.listeners) listener(this.value);
   };
   subscribe(listener: (state: DashboardState) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }

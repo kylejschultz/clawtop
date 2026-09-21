@@ -177,3 +177,12 @@ test("rejects ambiguous or non-advancing active pagination instead of publishing
     /did not advance/
   );
 });
+
+test("bounds advancing active-session pagination", async () => {
+  let calls = 0;
+  await assert.rejects(fetchActiveSessions(async () => {
+    calls += 1;
+    return { sessions: [row(`active-${calls}`)], hasMore: true, nextOffset: calls };
+  }), /exceeded 20 pages/);
+  assert.equal(calls, 20);
+});

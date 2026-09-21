@@ -181,6 +181,25 @@ test("trailing usage and unrecognized agent events do not reactivate a completed
   assert.equal(state.gateways.alpha?.activeSessions, 0);
 });
 
+test("terminal sessions ignore ambiguous updates and late active events from the completed run", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [root()], 10));
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 20, payload: { sessionKey: root().key, runId: "completed-run", stream: "lifecycle", data: { type: "start" } } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 30, payload: { sessionKey: root().key, runId: "completed-run", stream: "lifecycle", data: { type: "end" } } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 40, payload: { sessionKey: root().key, runId: "completed-run", stream: "tool", data: { phase: "running", name: "late-tool" } } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "idle");
+
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 50, payload: { sessionKey: root().key, status: "completed" } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 60, payload: { sessionKey: root().key, hasActiveRun: true } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "idle");
+
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 70, payload: { sessionKey: root().key, status: "running", hasActiveRun: true } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "active");
+
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 80, payload: { sessionKey: root().key, runId: "completed-run", stream: "lifecycle", data: { type: "end" } } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 90, payload: { sessionKey: root().key, runId: "new-run", stream: "lifecycle", data: { type: "start" } } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "active");
+});
+
 test("events and connection failures remain isolated to their Gateway", () => {
   let state = reduceDashboard(createState("demo", 0), snapshot(alpha, [root()], 10));
   state = reduceDashboard(state, snapshot(beta, [root()], 11));

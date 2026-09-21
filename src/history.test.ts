@@ -124,3 +124,22 @@ test("activity cursors preserve events with identical timestamps", () => {
   assert.equal(new Set(ids).size, 41);
   history.close();
 });
+
+test("restored activity exposes the exact database cursor for same-timestamp continuation", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "clawtop-history-")), "history.sqlite");
+  const history = new HistoryStore(path);
+  const empty = createState("live", 1);
+  let state = reduceDashboard(empty, { type: "snapshot", gateway, agents: [], sessions: [{ key: "cursor", sessionId: "run", kind: "direct" }], at: 10 });
+  history.persist(empty, state);
+  for (let index = 0; index < 41; index += 1) {
+    const next = reduceDashboard(state, { type: "event", gateway, event: "session.message", payload: { sessionKey: "cursor", runId: `run-${index}`, status: "done" }, at: 100 });
+    history.persist(state, next);
+    state = next;
+  }
+  const restored = history.restore({ ...state.sessions["one::cursor"]!, activity: [] });
+  assert.ok(restored.activityCursor);
+  const continuation = history.activityPage(restored.historyId!, 40, restored.activityCursor);
+  assert.equal(continuation.events.length, 1);
+  assert.equal(new Set([...restored.activity, ...continuation.events].map((event) => event.id)).size, 41);
+  history.close();
+});

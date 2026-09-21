@@ -44,6 +44,8 @@ export type DashboardProgress = {
 export type DashboardSession = {
   key: string;
   historyId?: string;
+  activityCursor?: string;
+  activityHistoryComplete?: boolean;
   sourceKey: string;
   gatewayId: string;
   sessionId?: string;
@@ -64,6 +66,7 @@ export type DashboardSession = {
   placement?: DashboardPlacement;
   status?: string;
   progress?: DashboardProgress;
+  terminalRunId?: string | null;
   activity: SafeActivity[];
 };
 export type DashboardAgent = { id: string; sourceId: string; gatewayId: string; name: string; emoji?: string; model?: string; agentRuntime?: DashboardRuntime };
@@ -142,6 +145,7 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
     const prior = old && sessionId && old.sessionId === sessionId ? old : undefined;
     if (!agents[agentId]) agents[agentId] = { id: agentId, sourceId: row.agentId ?? "unknown", gatewayId, name: row.agentId ?? "unknown" };
     const nextState = activityFromRow(row);
+    const rowStatus = row.status?.trim().toLowerCase();
     sessions[key] = compact({
       key,
       sourceKey: row.key,
@@ -164,6 +168,7 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
       placement: projectPlacement(row.placement),
       status: row.status,
       progress: prior?.progress,
+      terminalRunId: nextState === "active" ? undefined : isTerminalStatus(rowStatus) ? prior?.terminalRunId ?? null : prior?.terminalRunId,
       activity: prior?.activity ?? []
     });
   }
@@ -209,27 +214,34 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
   const sessionKey = current.key;
 
   const activity = normalizeActivity(event, value, nested, sessionKey, at);
+  const runId = string(value.runId) ?? string(nested?.runId);
   let nextState = current.state;
   let nextStatus = current.status;
+  let terminalRunId = current.terminalRunId;
   if (event === "sessions.changed") {
     const status = string(value.status)?.trim().toLowerCase();
     nextStatus = status ?? current.status;
-    if (isTerminalStatus(status)) nextState = "idle";
-    else if (status === "running" || status === "queued") nextState = "active";
+    if (isTerminalStatus(status)) { nextState = "idle"; terminalRunId = runId ?? current.terminalRunId ?? null; }
+    else if (status === "running" || status === "queued") { nextState = "active"; terminalRunId = undefined; }
+    else if (isTerminalStatus(current.status) || current.terminalRunId !== undefined) nextState = "idle";
     else if (typeof value.hasActiveRun === "boolean") nextState = value.hasActiveRun ? "active" : "idle";
     else if (Array.isArray(value.activeRunIds)) nextState = value.activeRunIds.length ? "active" : "idle";
   } else if (event === "agent") {
     const stream = string(value.stream);
     const phase = string(nested?.type) ?? string(nested?.phase);
     const commandPhase = string(nested?.phase) ?? string(nested?.status);
-    if (stream === "lifecycle" && (phase === "end" || phase === "error")) nextState = "idle";
-    else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) nextState = "active";
+    if (stream === "lifecycle" && (phase === "end" || phase === "error")) { nextState = "idle"; terminalRunId = runId ?? null; }
+    else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) {
+      const startsNewRun = Boolean(runId && terminalRunId && runId !== terminalRunId);
+      if (terminalRunId === undefined || startsNewRun) { nextState = "active"; nextStatus = startsNewRun ? undefined : nextStatus; terminalRunId = undefined; }
+    }
   }
 
   const next: DashboardSession = compact({
     ...current,
     state: nextState,
     status: nextStatus,
+    terminalRunId,
     activeSince: nextState === "active" ? current.activeSince ?? at : undefined,
     lastSignalAt: at,
     activity: activity ? mergeActivity(current.activity, activity) : current.activity
