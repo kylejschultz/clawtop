@@ -149,6 +149,19 @@ test("terminal runtime status overrides stale active flags and run ids", () => {
   assert.equal(state.gateways.alpha?.activeSessions, 0);
 });
 
+test("a lifecycle start opens a new run after an ID-less terminal snapshot", () => {
+  let state = reduceDashboard(createState("live", 0), snapshot(alpha, [root({ status: "completed" })], 10));
+  assert.equal(state.sessions["alpha::agent:main:root"]?.terminalRunId, null);
+
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 20, payload: { sessionKey: root().key, runId: "new-run", stream: "lifecycle", data: { type: "start" } } });
+  const session = state.sessions["alpha::agent:main:root"];
+  assert.equal(session?.state, "active");
+  assert.equal(session?.status, undefined);
+  assert.deepEqual(session?.activeRunIds, ["new-run"]);
+  assert.equal(session?.terminalRunId, undefined);
+  assert.equal(state.gateways.alpha?.activeSessions, 1);
+});
+
 test("Gateway active total is derived from the same normalized sessions", () => {
   const state = reduceDashboard(createState("live", 0), {
     ...snapshot(alpha, [

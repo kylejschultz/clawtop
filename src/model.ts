@@ -239,7 +239,9 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
       if (!belongsToOlderRun) { nextState = "idle"; activeRunIds = undefined; terminalRunId = runId ?? null; }
     }
     else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) {
-      const startsNewRun = Boolean(runId && terminalRunId && runId !== terminalRunId);
+      const startsNewRun = Boolean(runId && (terminalRunId === null
+        ? stream === "lifecycle" && phase === "start"
+        : terminalRunId !== undefined && runId !== terminalRunId));
       if (terminalRunId === undefined || startsNewRun) { nextState = "active"; nextStatus = startsNewRun ? undefined : nextStatus; activeRunIds = runId ? [runId] : activeRunIds; terminalRunId = undefined; }
     }
   }
