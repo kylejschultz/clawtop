@@ -192,10 +192,12 @@ test("terminal sessions ignore ambiguous updates and late active events from the
   state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 60, payload: { sessionKey: root().key, hasActiveRun: true } });
   assert.equal(state.sessions["alpha::agent:main:root"]?.state, "idle");
 
-  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 70, payload: { sessionKey: root().key, status: "running", hasActiveRun: true } });
+  state = reduceDashboard(state, { type: "event", gateway: alpha, event: "sessions.changed", at: 70, payload: { sessionKey: root().key, status: "running", hasActiveRun: true, activeRunIds: ["new-run"] } });
   assert.equal(state.sessions["alpha::agent:main:root"]?.state, "active");
 
   state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 80, payload: { sessionKey: root().key, runId: "completed-run", stream: "lifecycle", data: { type: "end" } } });
+  assert.equal(state.sessions["alpha::agent:main:root"]?.state, "active");
+  assert.equal(state.gateways.alpha?.activeSessions, 1);
   state = reduceDashboard(state, { type: "event", gateway: alpha, event: "agent", at: 90, payload: { sessionKey: root().key, runId: "new-run", stream: "lifecycle", data: { type: "start" } } });
   assert.equal(state.sessions["alpha::agent:main:root"]?.state, "active");
 });
