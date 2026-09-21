@@ -7,6 +7,7 @@ import type { EventFrame, HelloOk } from "@openclaw/gateway-protocol/frame-guard
 import type { AppSettings, Config, GatewayConfig } from "./config.js";
 import { createIdentityHost } from "./identity.js";
 import { activityFromRow, isTerminalStatus, type DashboardAction, type GatewayRef, type SessionWire } from "./model.js";
+import { APP_VERSION } from "./version.js";
 
 type Dispatch = (action: DashboardAction) => void;
 export type ActivityAdapter = { start(): void; stop(): Promise<void>; update?(gateways: GatewayConfig[]): Promise<void>; refresh?(): void };
@@ -125,7 +126,7 @@ class LiveAdapter implements ActivityAdapter {
       tlsFingerprint: config.tlsFingerprint,
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
       clientDisplayName: `Clawtop (${config.name})`,
-      clientVersion: "0.1.0",
+      clientVersion: APP_VERSION,
       platform: process.platform,
       deviceFamily: "server",
       mode: GATEWAY_CLIENT_MODES.BACKEND,
