@@ -7,7 +7,7 @@ type Gateway = { id: string; name: string; host?: string; totalSessions?: number
 type Runtime = { id: string; source: string; fallback?: string; cloudPlacementSupported?: boolean; cloudPlacementExecutionMode?: string; devicePlacementSupported?: boolean; devicePlacement?: { consumesWorkerSlot: boolean } };
 type Placement = { state: string; providerId?: string; profileId?: string; machine?: { class?: string; os?: string; osLabel?: string }; runner?: { kind: "device"; status: "available" | "offline"; deviceId?: string } };
 type Progress = { revision: number; updatedAt: number; completed: number; total: number; step?: string; stepStatus?: "in_progress" | "pending" };
-type Session = { key: string; historyId?: string; sourceKey: string; gatewayId: string; sessionId?: string; agentId: string; title: string; kind: string; channel?: string; parentSessionKey?: string; childSessions: string[]; state: ActivityState; lifecycleSince: number; activeSince?: number; updatedAt?: number; lastSignalAt?: number; model?: string; modelProvider?: string; agentRuntime?: Runtime; placement?: Placement; status?: string; progress?: Progress; activity: Activity[] };
+type Session = { key: string; historyId?: string; activityCursor?: string; activityHistoryComplete?: boolean; sourceKey: string; gatewayId: string; sessionId?: string; agentId: string; title: string; kind: string; channel?: string; parentSessionKey?: string; childSessions: string[]; state: ActivityState; lifecycleSince: number; activeSince?: number; updatedAt?: number; lastSignalAt?: number; model?: string; modelProvider?: string; agentRuntime?: Runtime; placement?: Placement; status?: string; progress?: Progress; activity: Activity[] };
 type Agent = { id: string; sourceId: string; gatewayId: string; name: string; emoji?: string; model?: string; agentRuntime?: Runtime };
 type State = { mode: "demo" | "live"; gateways: Record<string, Gateway>; agents: Record<string, Agent>; sessions: Record<string, Session>; updatedAt: number };
 
@@ -594,28 +594,22 @@ function showPageState(id: string, message?: string): void { const node = get(id
 async function loadOlderEvents(): Promise<void> {
   const session = state?.sessions[selected] ?? focusedSession;
   if (!session || eventLoading.has(session.key) || eventEnded.has(session.key)) return;
+  if (session.activityHistoryComplete && !eventCursors.has(session.key)) { eventEnded.add(session.key); showPageState("event-page-state", "Start of recorded activity"); return; }
   eventLoading.add(session.key);
   showPageState("event-page-state", "Loading earlier activity…");
   const query = new URLSearchParams({ historyId: session.historyId ?? session.key, limit: "40" });
-  const cursor = eventCursors.get(session.key) ?? cursorAfter(session.activity);
+  const cursor = eventCursors.get(session.key) ?? session.activityCursor;
   if (cursor) query.set("cursor", cursor);
   try {
     const response = await fetch(`/api/history/events?${query}`);
     if (!response.ok) return showPageState("event-page-state", "Earlier activity could not be loaded.");
     const page = await response.json() as { events: Activity[]; nextCursor?: string };
     loadedEvents.set(session.key, [...(loadedEvents.get(session.key) ?? []), ...page.events]);
-    if (page.nextCursor) eventCursors.set(session.key, page.nextCursor);
+    if (page.nextCursor && page.nextCursor !== cursor) eventCursors.set(session.key, page.nextCursor);
+    else if (page.nextCursor === cursor) { eventEnded.add(session.key); return showPageState("event-page-state", "Earlier activity could not be loaded."); }
     else eventEnded.add(session.key);
     showPageState("event-page-state", page.nextCursor ? undefined : "Start of recorded activity");
     renderDetail();
   } catch { showPageState("event-page-state", "Earlier activity could not be loaded."); }
   finally { eventLoading.delete(session.key); }
-}
-function cursorAfter(events: Activity[]): string | undefined {
-  const last = [...events].sort((a, b) => b.at - a.at || a.id.localeCompare(b.id)).at(-1);
-  if (!last) return undefined;
-  const bytes = new TextEncoder().encode(JSON.stringify([last.at, last.id]));
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }

@@ -22,6 +22,7 @@ export type SessionViewResult = SessionsResult & {
 type ProgressCardGetResult = { card: ProgressCard | null };
 type Request = (method: string, params: Record<string, unknown>) => Promise<unknown>;
 const SESSION_PAGE_SIZE = 200;
+const MAX_ACTIVE_SESSION_PAGES = 20;
 
 export class ExactSessionSubscriptions {
   private readonly current = new Map<string, { key: string; agentId?: string }>();
@@ -355,8 +356,11 @@ export function createActiveSessionFetcher(request: Request): () => Promise<Sess
 export async function fetchActiveSessions(request: Request): Promise<SessionsResult> {
   const sessions = new Map<string, SessionWire>();
   let offset = 0;
+  let pages = 0;
   let totalCount: number | undefined;
   while (true) {
+    if (pages >= MAX_ACTIVE_SESSION_PAGES) throw new Error(`active session pagination exceeded ${MAX_ACTIVE_SESSION_PAGES} pages`);
+    pages += 1;
     const page = validSessions(await request("sessions.list", { activeOnly: true, limit: SESSION_PAGE_SIZE, offset }));
     totalCount = page.totalCount ?? totalCount;
     const before = sessions.size;

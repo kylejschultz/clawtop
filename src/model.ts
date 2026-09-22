@@ -44,6 +44,8 @@ export type DashboardProgress = {
 export type DashboardSession = {
   key: string;
   historyId?: string;
+  activityCursor?: string;
+  activityHistoryComplete?: boolean;
   sourceKey: string;
   gatewayId: string;
   sessionId?: string;
@@ -64,6 +66,8 @@ export type DashboardSession = {
   placement?: DashboardPlacement;
   status?: string;
   progress?: DashboardProgress;
+  activeRunIds?: string[];
+  terminalRunId?: string | null;
   activity: SafeActivity[];
 };
 export type DashboardAgent = { id: string; sourceId: string; gatewayId: string; name: string; emoji?: string; model?: string; agentRuntime?: DashboardRuntime };
@@ -142,6 +146,7 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
     const prior = old && sessionId && old.sessionId === sessionId ? old : undefined;
     if (!agents[agentId]) agents[agentId] = { id: agentId, sourceId: row.agentId ?? "unknown", gatewayId, name: row.agentId ?? "unknown" };
     const nextState = activityFromRow(row);
+    const rowStatus = row.status?.trim().toLowerCase();
     sessions[key] = compact({
       key,
       sourceKey: row.key,
@@ -164,6 +169,8 @@ function applySnapshot(state: DashboardState, action: Extract<DashboardAction, {
       placement: projectPlacement(row.placement),
       status: row.status,
       progress: prior?.progress,
+      activeRunIds: nextState === "active" ? runIds(row.activeRunIds) ?? prior?.activeRunIds : undefined,
+      terminalRunId: nextState === "active" ? undefined : isTerminalStatus(rowStatus) ? prior?.terminalRunId ?? null : prior?.terminalRunId,
       activity: prior?.activity ?? []
     });
   }
@@ -209,27 +216,42 @@ function applyEvent(state: DashboardState, gateway: GatewayRef, event: string, p
   const sessionKey = current.key;
 
   const activity = normalizeActivity(event, value, nested, sessionKey, at);
+  const runId = string(value.runId) ?? string(nested?.runId);
   let nextState = current.state;
   let nextStatus = current.status;
+  let activeRunIds = current.activeRunIds;
+  let terminalRunId = current.terminalRunId;
   if (event === "sessions.changed") {
     const status = string(value.status)?.trim().toLowerCase();
+    const changedRunIds = runIds(value.activeRunIds);
     nextStatus = status ?? current.status;
-    if (isTerminalStatus(status)) nextState = "idle";
-    else if (status === "running" || status === "queued") nextState = "active";
-    else if (typeof value.hasActiveRun === "boolean") nextState = value.hasActiveRun ? "active" : "idle";
-    else if (Array.isArray(value.activeRunIds)) nextState = value.activeRunIds.length ? "active" : "idle";
+    if (isTerminalStatus(status)) { nextState = "idle"; activeRunIds = undefined; terminalRunId = runId ?? current.terminalRunId ?? null; }
+    else if (status === "running" || status === "queued") { nextState = "active"; activeRunIds = changedRunIds ?? (runId ? [runId] : activeRunIds); terminalRunId = undefined; }
+    else if (isTerminalStatus(current.status) || current.terminalRunId !== undefined) nextState = "idle";
+    else if (typeof value.hasActiveRun === "boolean") { nextState = value.hasActiveRun ? "active" : "idle"; activeRunIds = nextState === "active" ? changedRunIds ?? activeRunIds : undefined; }
+    else if (changedRunIds) { nextState = changedRunIds.length ? "active" : "idle"; activeRunIds = changedRunIds.length ? changedRunIds : undefined; }
   } else if (event === "agent") {
     const stream = string(value.stream);
     const phase = string(nested?.type) ?? string(nested?.phase);
     const commandPhase = string(nested?.phase) ?? string(nested?.status);
-    if (stream === "lifecycle" && (phase === "end" || phase === "error")) nextState = "idle";
-    else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) nextState = "active";
+    if (stream === "lifecycle" && (phase === "end" || phase === "error")) {
+      const belongsToOlderRun = Boolean(runId && activeRunIds?.length && !activeRunIds.includes(runId));
+      if (!belongsToOlderRun) { nextState = "idle"; activeRunIds = undefined; terminalRunId = runId ?? null; }
+    }
+    else if ((stream === "lifecycle" && ["start", "working", "thinking"].includes(phase ?? "")) || ((stream === "tool" || (stream === "item" && nested?.commandBearing === true)) && ["start", "running"].includes(commandPhase ?? ""))) {
+      const startsNewRun = Boolean(runId && (terminalRunId === null
+        ? stream === "lifecycle" && phase === "start"
+        : terminalRunId !== undefined && runId !== terminalRunId));
+      if (terminalRunId === undefined || startsNewRun) { nextState = "active"; nextStatus = startsNewRun ? undefined : nextStatus; activeRunIds = runId ? [runId] : activeRunIds; terminalRunId = undefined; }
+    }
   }
 
   const next: DashboardSession = compact({
     ...current,
     state: nextState,
     status: nextStatus,
+    activeRunIds,
+    terminalRunId,
     activeSince: nextState === "active" ? current.activeSince ?? at : undefined,
     lastSignalAt: at,
     activity: activity ? mergeActivity(current.activity, activity) : current.activity
@@ -355,6 +377,7 @@ function scopedSession(gatewayId: string, key: string, agentId?: string): string
 function sessionSourceScope(gatewayId: string, key: string | undefined, agentId?: string): string | undefined { return key ? scopedSession(gatewayId, key, agentId) : undefined; }
 function record(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function string(value: unknown): string | undefined { return typeof value === "string" && value ? value : undefined; }
+function runIds(value: unknown): string[] | undefined { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item)) : undefined; }
 function shortKey(key: string): string { const parts = key.split(":"); return parts.at(-1) || key; }
 function boundedText(value: string, limit: number): string | undefined {
   const text = value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, " ").replace(/\s+/gu, " ").trim();
